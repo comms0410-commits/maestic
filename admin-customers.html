@@ -1,1 +1,137 @@
-<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Maestic - 고객 월별 현황 관리</title><link rel="stylesheet" href="css/style.css"></head><body><nav id="navbar" class="navbar"></nav><main class="container"><header class="page-header"><div><p class="eyebrow">MONTHLY STATUS</p><h1>고객 월별 현황 관리</h1><p>주차별 업로드 현황, 공개 메모, 내부 메모를 관리합니다.</p></div><div class="actions"><select id="customerSelect"></select><select id="monthSelect"><option value="2026-03">2026년 3월</option><option value="2026-04">2026년 4월</option></select></div></header><section class="panel"><div class="panel-header"><h2 id="title">월별 현황</h2><button id="saveBtn" class="primary-btn">저장 및 알림 발송</button></div><div class="panel-body"><div class="form-grid" id="statusForm"></div></div></section></main><script src="js/common.js"></script><script>Page.initProtected('admin');let state=Store.load();state.customers.forEach(c=>customerSelect.innerHTML+=`<option value="${c.customer_no}">${c.customer_name} (${c.customer_no})</option>`);function getRecord(){const [year,month]=monthSelect.value.split('-').map(Number);let r=state.monthly_status.find(x=>x.customer_no===customerSelect.value&&x.year===year&&x.month===month);if(!r){const c=state.customers.find(x=>x.customer_no===customerSelect.value);r={id:`m-${c.customer_no}-${year}-${month}`,customer_no:c.customer_no,year,month,total_target:c.monthly_quota,total_completed:0,week1_info:'',week1_done:0,week2_info:'',week2_done:0,week3_info:'',week3_done:0,week4_info:'',week4_done:0,public_note:'',internal_note:'',status:'in_progress'};state.monthly_status.push(r);}return r;}function render(){const c=state.customers.find(x=>x.customer_no===customerSelect.value);const r=getRecord();title.textContent=`${c.customer_name} · ${r.year}년 ${r.month}월`;statusForm.innerHTML=`${[1,2,3,4].map(w=>`<label class="field"><span>${w}주차 일정</span><input class="input" name="week${w}_info" value="${UI.escape(r[`week${w}_info`]||'')}"></label><label class="field"><span>${w}주차 완료수</span><input class="input" type="number" name="week${w}_done" value="${r[`week${w}_done`]||0}"></label>`).join('')}<label class="field"><span>월 목표</span><input class="input" type="number" name="total_target" value="${r.total_target||0}"></label><label class="field"><span>월 완료</span><input class="input" type="number" name="total_completed" value="${r.total_completed||0}"></label><label class="field"><span>상태</span><select name="status"><option value="in_progress">진행중</option><option value="completed">완료</option><option value="paused">일시정지</option></select></label><label class="field full"><span>고객 공개 메모</span><textarea name="public_note" rows="3">${UI.escape(r.public_note||'')}</textarea></label><label class="field full"><span>관리자 내부 메모</span><textarea name="internal_note" rows="3">${UI.escape(r.internal_note||'')}</textarea></label>`;statusForm.querySelector('[name=status]').value=r.status;}function save(){const r=getRecord();statusForm.querySelectorAll('input,textarea,select').forEach(el=>r[el.name]=el.type==='number'?Number(el.value):el.value);Store.save(state);const c=state.customers.find(x=>x.customer_no===r.customer_no);Webhook.send('status_update',c.customer_no,c.customer_name,`${r.year}년 ${r.month}월 현황이 업데이트되었습니다.`);UI.toast('월별 현황을 저장하고 알림을 기록했습니다.');}customerSelect.onchange=render;monthSelect.onchange=render;saveBtn.onclick=save;render();</script></body></html>
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Maestic - 고객관리</title>
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <nav id="navbar" class="navbar"></nav>
+    <main class="container">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">CUSTOMER MANAGEMENT</p>
+          <h1>고객관리 및 월별 현황</h1>
+          <p>계약 상태, 상품 구분, 장기 미계약 삭제, 1~5주차 월별 제작 현황을 관리합니다.</p>
+        </div>
+        <div class="actions">
+          <select id="customerSelect"></select>
+          <select id="monthSelect"></select>
+        </div>
+      </header>
+
+      <section class="grid dashboard-grid">
+        <article class="panel span-2">
+          <div class="panel-header">
+            <h2>고객 계약/상품 관리</h2>
+            <div class="filters">
+              <select id="productFilter"><option value="all">전체 상품</option></select>
+              <select id="statusFilter"><option value="all">전체 상태</option><option value="active">활성</option><option value="contract_pending">계약대기</option><option value="inactive">비활성</option></select>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>고객</th><th>상품</th><th>계약상태</th><th>미계약 기간</th><th>월 제작</th><th>관리</th></tr></thead>
+              <tbody id="customerRows"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel span-2">
+          <div class="panel-header">
+            <h2 id="title">월별 현황</h2>
+            <button id="saveBtn" class="primary-btn">저장 및 알림 발송</button>
+          </div>
+          <div class="panel-body">
+            <div class="form-grid" id="statusForm"></div>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <script src="js/common.js"></script>
+    <script>
+      Page.initProtected('admin');
+      let state = Store.load();
+
+      PRODUCT_TYPES.forEach((type) => (productFilter.innerHTML += `<option>${type}</option>`));
+      getMonthOptions().forEach((option) => (monthSelect.innerHTML += `<option value="${option.value}">${option.label}</option>`));
+      monthSelect.value = `${CURRENT_DATE.getUTCFullYear()}-${String(CURRENT_DATE.getUTCMonth() + 1).padStart(2, '0')}`;
+
+      function visibleCustomers() { return state.customers.filter((customer) => customer.status !== 'deleted'); }
+      function syncCustomerSelect() {
+        const selected = customerSelect.value;
+        customerSelect.innerHTML = visibleCustomers().map((c) => `<option value="${c.customer_no}">${UI.escape(c.customer_name)} (${c.customer_no})</option>`).join('');
+        if (selected && visibleCustomers().some((c) => c.customer_no === selected)) customerSelect.value = selected;
+      }
+      function filteredCustomers() {
+        return visibleCustomers().filter((c) => (productFilter.value === 'all' || c.product_type === productFilter.value) && (statusFilter.value === 'all' || c.status === statusFilter.value));
+      }
+      function renderCustomers() {
+        customerRows.innerHTML = filteredCustomers().map((c) => `<tr><td><div class="customer-cell"><strong>${UI.escape(c.customer_name)}</strong><small>No. ${c.customer_no}</small></div></td><td>${UI.productBadge(c.product_type)}</td><td>${UI.statusBadge(c.status)}</td><td>${c.pending_months || 0}개월</td><td>${c.monthly_quota || 0}개</td><td><div class="actions"><button class="secondary-btn" onclick="setContractStatus('${c.customer_no}','contract_pending')">계약대기</button><button class="ghost-btn" onclick="setContractStatus('${c.customer_no}','active')">활성화</button>${Metrics.isLongUncontracted(c) ? `<button class="danger-btn" onclick="deleteCustomer('${c.customer_no}')">장기 미계약 삭제</button>` : ''}</div></td></tr>`).join('');
+      }
+      function getRecord() {
+        const [year, month] = monthSelect.value.split('-').map(Number);
+        const customer = state.customers.find((item) => item.customer_no === customerSelect.value);
+        let record = state.monthly_status.find((item) => item.customer_no === customer.customer_no && item.year === year && item.month === month);
+        if (!record) {
+          record = { id: `m-${customer.customer_no}-${year}-${month}`, customer_no: customer.customer_no, year, month, total_target: customer.monthly_quota, total_completed: 0, public_note: '', internal_note: '', status: 'in_progress' };
+          [1, 2, 3, 4, 5].forEach((week) => { record[`week${week}_info`] = ''; record[`week${week}_done`] = 0; });
+          state.monthly_status.push(record);
+        }
+        record.total_completed = sumWeeklyDone(record);
+        return record;
+      }
+      function renderMonthly() {
+        const customer = state.customers.find((item) => item.customer_no === customerSelect.value);
+        if (!customer) return;
+        const record = getRecord();
+        title.textContent = `${customer.customer_name} · ${record.year}년 ${record.month}월`;
+        statusForm.innerHTML = `${[1, 2, 3, 4, 5].map((week) => `<label class="field"><span>${week}주차 일정</span><input class="input" name="week${week}_info" value="${UI.escape(record[`week${week}_info`] || '')}"></label><label class="field"><span>${week}주차 제작 수량</span><input class="input weekly-done" type="number" name="week${week}_done" value="${record[`week${week}_done`] || 0}"></label>`).join('')}<label class="field"><span>월 목표</span><input class="input" type="number" name="total_target" value="${record.total_target || 0}"></label><label class="field"><span>월 완료(1~5주차 합산)</span><input class="input" id="totalCompleted" type="number" value="${record.total_completed || 0}" readonly></label><label class="field"><span>상태</span><select name="status"><option value="in_progress">진행중</option><option value="completed">완료</option><option value="contract_pending">계약대기</option></select></label><label class="field full"><span>고객 공개 메모</span><textarea name="public_note" rows="3">${UI.escape(record.public_note || '')}</textarea></label><label class="field full"><span>관리자 내부 메모</span><textarea name="internal_note" rows="3">${UI.escape(record.internal_note || '')}</textarea></label>`;
+        statusForm.querySelector('[name=status]').value = record.status;
+        statusForm.querySelectorAll('.weekly-done').forEach((input) => input.addEventListener('input', updateTotalCompleted));
+      }
+      function updateTotalCompleted() {
+        totalCompleted.value = [...statusForm.querySelectorAll('.weekly-done')].reduce((sum, input) => sum + Number(input.value || 0), 0);
+      }
+      function saveMonthly() {
+        const record = getRecord();
+        statusForm.querySelectorAll('input:not(#totalCompleted),textarea,select').forEach((el) => { record[el.name] = el.type === 'number' ? Number(el.value) : el.value; });
+        record.total_completed = sumWeeklyDone(record);
+        Store.save(state);
+        const customer = state.customers.find((item) => item.customer_no === record.customer_no);
+        Notifier.send('status_update', customer.customer_no, customer.customer_name, `${record.year}년 ${record.month}월 현황이 업데이트되었습니다.`);
+        UI.toast('월별 현황을 저장하고 알림을 기록했습니다.');
+        renderMonthly();
+      }
+      function setContractStatus(no, status) {
+        const customer = state.customers.find((item) => item.customer_no === no);
+        customer.status = status;
+        customer.contract_renewed = status === 'active';
+        if (status === 'contract_pending') customer.pending_months = Math.max(1, Number(customer.pending_months || 0));
+        if (status === 'active') customer.pending_months = 0;
+        Store.save(state);
+        Notifier.send('contract_status', customer.customer_no, customer.customer_name, `계약 상태가 ${status === 'active' ? '활성' : '계약대기'}(으)로 변경되었습니다.`);
+        UI.toast('계약 상태를 변경했습니다.');
+        renderAll();
+      }
+      function deleteCustomer(no) {
+        const customer = state.customers.find((item) => item.customer_no === no);
+        if (!Metrics.isLongUncontracted(customer)) { UI.toast('3개월 이상 계약대기 고객만 삭제할 수 있습니다.', 'warning'); return; }
+        customer.status = 'deleted';
+        Store.save(state);
+        Notifier.send('customer_deleted', customer.customer_no, customer.customer_name, '장기간 미계약 고객으로 삭제 처리되었습니다.');
+        UI.toast('장기 미계약 고객을 삭제 처리했습니다.');
+        renderAll();
+      }
+      function renderAll() { syncCustomerSelect(); renderCustomers(); renderMonthly(); }
+      productFilter.onchange = renderCustomers;
+      statusFilter.onchange = renderCustomers;
+      customerSelect.onchange = renderMonthly;
+      monthSelect.onchange = renderMonthly;
+      saveBtn.onclick = saveMonthly;
+      renderAll();
+    </script>
+  </body>
+</html>

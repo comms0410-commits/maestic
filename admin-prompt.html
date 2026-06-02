@@ -1,1 +1,129 @@
-<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Maestic - AI 프롬프트</title><link rel="stylesheet" href="css/style.css"></head><body><nav id="navbar" class="navbar"></nav><main class="container"><header class="page-header"><div><p class="eyebrow">AI PROMPT & WEBHOOK</p><h1>AI 프롬프트 관리</h1><p>고객별 톤앤매너와 API/Webhook 설정을 관리합니다.</p></div></header><section class="grid dashboard-grid"><article class="panel"><div class="panel-header"><h2>고객별 프롬프트</h2></div><form id="promptForm" class="panel-body form"><label class="field"><span>고객</span><select id="customerSelect" name="customer_no"></select></label><label class="field"><span>톤앤매너</span><input class="input" name="brand_tone" placeholder="전문적이고 신뢰감 있게"></label><label class="field"><span>타겟</span><input class="input" name="target_audience" placeholder="잠재 고객"></label><label class="field"><span>CTA</span><input class="input" name="cta_text" placeholder="상담 문의 / 채널 구독"></label><label class="field"><span>금지 표현</span><textarea name="restrictions" rows="3"></textarea></label><button class="primary-btn">프롬프트 저장</button></form></article><article class="panel"><div class="panel-header"><h2>Webhook 설정</h2></div><form id="webhookForm" class="panel-body form"><label class="field"><span>Claw Webhook URL</span><input class="input" name="clawWebhookUrl"></label><label class="field"><span>LINE Webhook URL</span><input class="input" name="lineWebhookUrl"></label><label class="field"><span>LINE Access Token</span><input class="input" name="lineAccessToken"></label><label><input type="checkbox" name="enabled"> 알림 활성화</label><button class="primary-btn">설정 저장</button><button type="button" class="secondary-btn" id="testWebhook">테스트 발송</button></form></article></section></main><script src="js/common.js"></script><script>Page.initProtected('admin');let state=Store.load();state.customers.forEach(c=>customerSelect.innerHTML+=`<option value="${c.customer_no}">${c.customer_name}</option>`);function loadPrompt(){const p=state.prompts[customerSelect.value]||{};promptForm.brand_tone.value=p.brand_tone||'';promptForm.target_audience.value=p.target_audience||'';promptForm.cta_text.value=p.cta_text||'';promptForm.restrictions.value=p.restrictions||'';}function loadWebhook(){const c=Webhook.getConfig();webhookForm.clawWebhookUrl.value=c.clawWebhookUrl||'';webhookForm.lineWebhookUrl.value=c.lineWebhookUrl||'';webhookForm.lineAccessToken.value=c.lineAccessToken||'';webhookForm.enabled.checked=!!c.enabled;}customerSelect.onchange=loadPrompt;promptForm.onsubmit=e=>{e.preventDefault();state.prompts[customerSelect.value]={brand_tone:promptForm.brand_tone.value,target_audience:promptForm.target_audience.value,cta_text:promptForm.cta_text.value,restrictions:promptForm.restrictions.value};Store.save(state);UI.toast('프롬프트를 저장했습니다.');};webhookForm.onsubmit=e=>{e.preventDefault();Webhook.saveConfig({clawWebhookUrl:webhookForm.clawWebhookUrl.value,lineWebhookUrl:webhookForm.lineWebhookUrl.value,lineAccessToken:webhookForm.lineAccessToken.value,enabled:webhookForm.enabled.checked});UI.toast('Webhook 설정을 저장했습니다.');};testWebhook.onclick=()=>{Webhook.send('test','admin','관리자','Webhook 테스트 발송');UI.toast('테스트 알림 이력을 기록했습니다.');};loadPrompt();loadWebhook();</script></body></html>
+<!doctype html>
+<html lang="ko">
+  <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><title>Maestic - AI 프롬프트</title><link rel="stylesheet" href="css/style.css" /></head>
+  <body>
+    <nav id="navbar" class="navbar"></nav>
+    <main class="container">
+      <header class="page-header"><div><p class="eyebrow">AI SCRIPT PROMPT</p><h1>AI 프롬프트 관리</h1><p>고객별 대본작성 프롬프트와 OpenAI API 연결을 관리합니다.</p></div></header>
+      <section class="grid dashboard-grid">
+        <article class="panel">
+          <div class="panel-header"><h2>OpenAI API 설정</h2></div>
+          <form id="apiKeyForm" class="panel-body form">
+            <label class="field"><span>OpenAI API Key</span><input class="input" name="apiKey" type="password" placeholder="sk-..." /></label>
+            <div class="actions"><button class="primary-btn">API 키 저장</button><button type="button" class="secondary-btn" id="testConnection">연결 테스트</button></div>
+            <p class="hint" id="connectionResult">API 키 저장 후 연결 테스트를 실행하세요.</p>
+          </form>
+        </article>
+        <article class="panel">
+          <div class="panel-header"><h2>고객별 대본작성 프롬프트</h2></div>
+          <form id="promptForm" class="panel-body form">
+            <label class="field"><span>고객</span><select id="customerSelect" name="customer_no"></select></label>
+            <label class="field"><span>톤앤매너</span><input class="input" name="brand_tone" placeholder="전문적이고 신뢰감 있게" /></label>
+            <label class="field"><span>타겟</span><input class="input" name="target_audience" placeholder="잠재 고객" /></label>
+            <label class="field"><span>대본작성 프롬프트</span><textarea name="script_prompt" rows="7" placeholder="기사 핵심을 30초 쇼츠 대본으로 구성하고, 고객 채널 성격에 맞게 후킹/본문/마무리 순서로 작성"></textarea></label>
+            <button class="primary-btn">프롬프트 저장</button>
+          </form>
+        </article>
+        <article class="panel span-2">
+          <div class="panel-header"><h2>확정 기사 Pick 기반 대본 생성</h2></div>
+          <form id="scriptGenerateForm" class="panel-body form">
+            <label class="field"><span>고객</span><select id="scriptCustomerSelect" name="customer_no"></select></label>
+            <label class="field"><span>확정 기사 URL</span><input class="input" name="article_url" type="url" placeholder="고객별 확정된 기사 Pick URL" required /></label>
+            <label class="field"><span>대본 제목</span><input class="input" name="script_title" placeholder="자동 생성 대본 제목" required /></label>
+            <button class="primary-btn">기사 기반 대본 생성</button>
+          </form>
+          <div id="generationResult" class="panel-body stack"></div>
+        </article>
+      </section>
+    </main>
+    <script src="js/common.js"></script>
+    <script>
+      Page.initProtected('admin');
+      let state = Store.load();
+      const activeCustomers = state.customers.filter((c) => c.status !== 'deleted');
+      activeCustomers.forEach((c) => {
+        customerSelect.innerHTML += `<option value="${c.customer_no}">${UI.escape(c.customer_name)}</option>`;
+        scriptCustomerSelect.innerHTML += `<option value="${c.customer_no}">${UI.escape(c.customer_name)}</option>`;
+      });
+      apiKeyForm.apiKey.value = OpenAISettings.getKey();
+      function loadPrompt() {
+        const prompt = state.prompts[customerSelect.value] || {};
+        promptForm.brand_tone.value = prompt.brand_tone || '';
+        promptForm.target_audience.value = prompt.target_audience || '';
+        promptForm.script_prompt.value = prompt.script_prompt || '';
+      }
+      apiKeyForm.onsubmit = (event) => {
+        event.preventDefault();
+        OpenAISettings.saveKey(apiKeyForm.apiKey.value.trim());
+        UI.toast('OpenAI API 키를 저장했습니다.');
+      };
+      testConnection.onclick = async () => {
+        const key = apiKeyForm.apiKey.value.trim() || OpenAISettings.getKey();
+        if (!key) { UI.toast('API 키를 먼저 입력해 주세요.', 'warning'); return; }
+        connectionResult.textContent = 'OpenAI API 연결 테스트 중...';
+        try {
+          const response = await fetch('https://api.openai.com/v1/models', { headers: { Authorization: `Bearer ${key}` } });
+          if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
+          connectionResult.textContent = '연결 테스트 성공: OpenAI API 키가 정상 응답했습니다.';
+          UI.toast('OpenAI API 연결 테스트 성공');
+        } catch (error) {
+          connectionResult.textContent = `연결 테스트 실패: ${error.message}`;
+          UI.toast('OpenAI API 연결 테스트 실패', 'error');
+        }
+      };
+      promptForm.onsubmit = (event) => {
+        event.preventDefault();
+        state.prompts[customerSelect.value] = { brand_tone: promptForm.brand_tone.value, target_audience: promptForm.target_audience.value, script_prompt: promptForm.script_prompt.value };
+        Store.save(state);
+        UI.toast('대본작성 프롬프트를 저장했습니다.');
+      };
+      async function readArticle(url, customer) {
+        try {
+          const response = await fetch(url);
+          if (!response.ok) throw new Error(`기사 서버가 HTTP ${response.status}로 응답`);
+          const text = await response.text();
+          const plainText = text.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+          if (!plainText) throw new Error('본문 텍스트를 추출할 수 없음');
+          return plainText.slice(0, 12000);
+        } catch (error) {
+          const message = `기사 링크를 읽을 수 없어 대본을 만들 수 없습니다. 사유: ${error.message}. URL: ${url}`;
+          Notifier.send('article_read_failed', customer.customer_no, customer.customer_name, message, { article_url: url });
+          throw new Error(message);
+        }
+      }
+      async function generateScriptWithOpenAI(customer, articleUrl, title) {
+        const key = OpenAISettings.getKey();
+        if (!key) throw new Error('OpenAI API 키가 저장되어 있지 않습니다.');
+        const prompt = state.prompts[customer.customer_no] || {};
+        const articleText = await readArticle(articleUrl, customer);
+        const input = `고객명: ${customer.customer_name}\n상품구분: ${customer.product_type}\n톤앤매너: ${prompt.brand_tone || '전문적이고 신뢰감 있게'}\n타겟: ${prompt.target_audience || '잠재 고객'}\n고객별 대본작성 프롬프트: ${prompt.script_prompt || '기사 내용을 바탕으로 30초 유튜브 쇼츠 대본을 작성해 주세요.'}\n\n기사 URL: ${articleUrl}\n기사 본문:\n${articleText}`;
+        const response = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'gpt-4.1-mini', input }) });
+        if (!response.ok) throw new Error(`OpenAI API가 HTTP ${response.status}로 응답했습니다.`);
+        const data = await response.json();
+        return data.output_text || data.output?.flatMap((item) => item.content || []).map((content) => content.text || '').join('\n') || '대본 결과를 읽을 수 없습니다.';
+      }
+      scriptGenerateForm.onsubmit = async (event) => {
+        event.preventDefault();
+        const customer = state.customers.find((c) => c.customer_no === scriptCustomerSelect.value);
+        const articleUrl = scriptGenerateForm.article_url.value.trim();
+        const title = scriptGenerateForm.script_title.value.trim();
+        generationResult.innerHTML = '<div class="card-row"><p>대본 생성 중입니다...</p></div>';
+        try {
+          const body = await generateScriptWithOpenAI(customer, articleUrl, title);
+          state = Store.load();
+          const script = { id: `s${Date.now()}`, customer_no: customer.customer_no, title, version: 1, status: 'reviewing', body, source_url: articleUrl, updated_at: Date.now() };
+          state.scripts.unshift(script);
+          Store.save(state);
+          Notifier.send('script_generated', customer.customer_no, customer.customer_name, '확정 기사 Pick 기반 대본이 생성되었습니다.', { script_id: script.id, article_url: articleUrl });
+          generationResult.innerHTML = `<div class="card-row"><h3>${UI.escape(title)} ${UI.statusBadge('reviewing')}</h3><p>${UI.escape(body)}</p></div>`;
+          UI.toast('대본을 생성했습니다.');
+        } catch (error) {
+          generationResult.innerHTML = `<div class="card-row warning"><h3>대본 생성 실패</h3><p>${UI.escape(error.message)}</p></div>`;
+          UI.toast('대본 생성 실패 알림을 기록했습니다.', 'error');
+        }
+      };
+      customerSelect.onchange = loadPrompt;
+      loadPrompt();
+    </script>
+  </body>
+</html>

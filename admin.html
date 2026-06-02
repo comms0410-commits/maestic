@@ -39,7 +39,7 @@
               <select id="statusFilter">
                 <option value="all">전체 상태</option>
                 <option value="active">활성</option>
-                <option value="pause">일시정지</option>
+                <option value="contract_pending">계약대기</option><option value="inactive">비활성</option>
                 <option value="attention">관리 필요</option>
               </select>
             </div>
@@ -107,7 +107,7 @@
             <span>상태</span>
             <select name="status">
               <option value="active">활성</option>
-              <option value="pause">일시정지</option>
+              <option value="contract_pending">계약대기</option><option value="inactive">비활성</option>
               <option value="inactive">비활성</option>
             </select>
           </label>
@@ -152,9 +152,10 @@
         const m = Metrics.summarize(state.customers);
         metrics.innerHTML = [
           ['활성 고객', `${m.activeCount}곳`, '전체 ' + m.totalCustomers + '곳'],
+          ['계약대기', `${m.contractPendingCount}곳`, '미연장 비활성 분류'],
           ['주간 제작 목표', `${m.totalWeeklyTarget}개`, '현재 ' + m.producedThisWeek + '개 제작'],
           ['예약 업로드', `${m.reservedCount}곳`, '예약 상태 Y'],
-          ['관리 필요', `${m.attentionCount}건`, '검수/예약/메모 확인'],
+          ['관리 필요', `${m.attentionCount}건`, '계약/검수/예약 확인'],
           ['총 구독자', UI.number(m.totalSubscribers), '채널 합산'],
         ]
           .map((x) => `<article class="metric-card"><span>${x[0]}</span><strong>${x[1]}</strong><small>${x[2]}</small></article>`)
@@ -165,7 +166,7 @@
         return state.customers.filter(
           (c) =>
             (productFilter.value === 'all' || c.product_type === productFilter.value) &&
-            (statusFilter.value === 'all' || c.status === statusFilter.value || (statusFilter.value === 'attention' && Metrics.needsAttention(c))),
+            (statusFilter.value === 'all' || c.status === statusFilter.value || (statusFilter.value === 'attention' && Metrics.needsAttention(c))) && c.status !== 'deleted',
         );
       }
 
@@ -182,7 +183,7 @@
               <td>${c.reservation_status === 'Y' ? '<span class="badge badge-success">Y</span>' : '<span class="badge badge-warning">미진행</span>'}</td>
               <td>${UI.number(c.subscribers)}</td>
               <td>${UI.escape(c.internal_note || c.public_note || '특이사항 없음')}</td>
-              <td><button class="ghost-btn" type="button" onclick="openEditCustomer('${c.customer_no}')">고객명 수정</button></td>
+              <td><div class="actions"><button class="ghost-btn" type="button" onclick="openEditCustomer('${c.customer_no}')">고객명 수정</button>${Metrics.isLongUncontracted(c) ? `<button class="danger-btn" type="button" onclick="deleteLongUncontractedCustomer('${c.customer_no}')">장기 미계약 삭제</button>` : `<button class="secondary-btn" type="button" onclick="markContractPending('${c.customer_no}')">계약대기</button>`}</div></td>
             </tr>`,
           )
           .join('');
@@ -236,9 +237,36 @@
 
       function notify(no) {
         const c = state.customers.find((x) => x.customer_no === no);
-        Webhook.send('status_update', c.customer_no, c.customer_name, '관리 필요 후속 조치가 등록되었습니다.');
+        Notifier.send('status_update', c.customer_no, c.customer_name, '관리 필요 후속 조치가 등록되었습니다.');
         state = Store.load();
         UI.toast(c.customer_name + ' 후속 조치 알림을 등록했습니다.');
+      }
+
+
+      function markContractPending(no) {
+        const c = state.customers.find((x) => x.customer_no === no);
+        if (!c) return;
+        c.status = 'contract_pending';
+        c.contract_renewed = false;
+        c.pending_months = Math.max(1, Number(c.pending_months || 0));
+        Store.save(state);
+        Notifier.send('contract_pending', c.customer_no, c.customer_name, '계약 연장이 확인되지 않아 계약대기/비활성 고객으로 분류되었습니다.');
+        UI.toast(`${c.customer_name} 고객을 계약대기로 분류했습니다.`);
+        render();
+      }
+
+      function deleteLongUncontractedCustomer(no) {
+        const c = state.customers.find((x) => x.customer_no === no);
+        if (!c || !Metrics.isLongUncontracted(c)) {
+          UI.toast('장기간 미계약 고객만 삭제할 수 있습니다.', 'warning');
+          return;
+        }
+        c.status = 'deleted';
+        c.internal_note = c.internal_note ? `${c.internal_note} / 장기 미계약 삭제 처리` : '장기 미계약 삭제 처리';
+        Store.save(state);
+        Notifier.send('customer_deleted', c.customer_no, c.customer_name, '장기간 미계약 고객으로 삭제 처리되었습니다.');
+        UI.toast(`${c.customer_name} 고객을 삭제 처리했습니다.`);
+        render();
       }
 
       function openEditCustomer(no) {
@@ -268,7 +296,7 @@
           c.internal_note = c.internal_note ? `${c.internal_note} / ${changeNote}` : changeNote;
         }
         Store.save(state);
-        Webhook.send('customer_name_updated', c.customer_no, c.customer_name, `고객명이 ${previousName}에서 ${nextName}(으)로 변경되었습니다.`);
+        Notifier.send('customer_name_updated', c.customer_no, c.customer_name, `고객명이 ${previousName}에서 ${nextName}(으)로 변경되었습니다.`);
         editCustomerModal.classList.add('hidden');
         UI.toast(`${previousName} 고객명을 ${nextName}(으)로 변경했습니다.`);
         render();

@@ -1,1 +1,45 @@
-<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Maestic - 기사 Pick</title><link rel="stylesheet" href="css/style.css"></head><body><nav id="navbar" class="navbar"></nav><main class="container"><header class="page-header"><div><p class="eyebrow">MY ARTICLE PICK</p><h1>기사 Pick</h1><p>추천 기사 중 최대 5개를 선택하고 직접 URL도 제출할 수 있습니다.</p></div></header><form id="pickForm" class="panel"><div class="panel-header"><h2>추천 기사</h2><button class="primary-btn">최종 제출</button></div><div id="list" class="panel-body stack"></div><div class="panel-body form"><label class="field"><span>직접 입력 URL 1</span><input class="input" name="url1"></label><label class="field"><span>직접 입력 URL 2</span><input class="input" name="url2"></label><label class="field"><span>직접 입력 URL 3</span><input class="input" name="url3"></label></div></form></main><script src="js/common.js"></script><script>const session=Page.initProtected('customer');let state=Store.load();function render(){const recs=state.article_recommendations.filter(r=>r.customer_no===session.customerNo);list.innerHTML=recs.map(r=>`<label class="card-row"><h3><input type="checkbox" name="pick" value="${r.id}"> ${UI.escape(r.title)} ${UI.statusBadge(r.status)}</h3><p>${r.url}</p></label>`).join('')||'<div class="empty">추천 기사가 아직 없습니다.</div>';}pickForm.onsubmit=e=>{e.preventDefault();const picked=[...document.querySelectorAll('[name=pick]:checked')].map(x=>x.value);if(picked.length>5){UI.toast('최대 5개까지 선택할 수 있습니다.','warning');return;}state.article_recommendations.forEach(r=>{if(picked.includes(r.id))r.status='picked';});Store.save(state);Webhook.send('pick_submitted',session.customerNo,session.name,`고객이 기사 ${picked.length}개를 Pick했습니다.`);UI.toast('기사 Pick을 제출했습니다.');render();};render();</script></body></html>
+<!doctype html>
+<html lang="ko">
+  <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><title>Maestic - 기사 Pick</title><link rel="stylesheet" href="css/style.css" /></head>
+  <body>
+    <nav id="navbar" class="navbar"></nav>
+    <main class="container">
+      <header class="page-header"><div><p class="eyebrow">MY ARTICLE PICK</p><h1>기사 Pick</h1><p>관리자가 해당 주차에 넣어 준 추천 기사를 우선 확인하고, 필요한 경우 직접 URL을 추가해 제출합니다.</p></div><div class="actions"><select id="weekSelect"><option value="1">1주차</option><option value="2">2주차</option><option value="3">3주차</option><option value="4">4주차</option><option value="5">5주차</option></select></div></header>
+      <form id="pickForm" class="panel">
+        <div class="panel-header"><h2>추천 기사</h2><button class="primary-btn">완료 / 최종 제출</button></div>
+        <div id="list" class="panel-body stack"></div>
+        <div class="panel-body form">
+          <label class="field"><span>직접 입력 URL 1</span><input class="input" name="url1" type="url" /></label>
+          <label class="field"><span>직접 입력 URL 2</span><input class="input" name="url2" type="url" /></label>
+          <label class="field"><span>직접 입력 URL 3</span><input class="input" name="url3" type="url" /></label>
+        </div>
+      </form>
+    </main>
+    <script src="js/common.js"></script>
+    <script>
+      const session = Page.initProtected('customer');
+      let state = Store.load();
+      function recommendations() { return state.article_recommendations.filter((r) => r.customer_no === session.customerNo && Number(r.week || 1) === Number(weekSelect.value)); }
+      function render() {
+        const recs = recommendations();
+        list.innerHTML = recs.map((r) => `<label class="card-row"><h3><input type="checkbox" name="pick" value="${r.id}"> ${UI.escape(r.title)} ${UI.statusBadge(r.status)}</h3><p>${UI.escape(r.url)}</p></label>`).join('') || '<div class="empty">해당 주차 추천 기사가 아직 없습니다. 직접 URL을 입력해 제출할 수 있습니다.</div>';
+      }
+      pickForm.onsubmit = (event) => {
+        event.preventDefault();
+        const picked = [...document.querySelectorAll('[name=pick]:checked')].map((input) => input.value);
+        const directUrls = ['url1', 'url2', 'url3'].map((name) => pickForm[name].value.trim()).filter(Boolean);
+        if (!picked.length && !directUrls.length) { UI.toast('추천 기사 선택 또는 직접 URL을 1개 이상 입력해 주세요.', 'warning'); return; }
+        state.article_recommendations.forEach((r) => { if (picked.includes(r.id)) r.status = 'confirmed'; });
+        const submission = { id: `ps${Date.now()}`, customer_no: session.customerNo, customer_name: session.name, week: Number(weekSelect.value), picked_recommendations: picked, direct_urls: directUrls, status: 'process_completed', created_at: Date.now() };
+        state.pick_submissions.unshift(submission);
+        Store.save(state);
+        Notifier.send('pick_completed', session.customerNo, session.name, `뉴스 Pick 처리완료: 추천 ${picked.length}개, 직접 입력 ${directUrls.length}개`, { submission_id: submission.id });
+        UI.toast('기사 Pick을 처리완료로 제출했습니다.');
+        event.target.reset();
+        render();
+      };
+      weekSelect.onchange = render;
+      render();
+    </script>
+  </body>
+</html>

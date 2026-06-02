@@ -1,1 +1,62 @@
-<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Maestic - 기사 Pick 관리</title><link rel="stylesheet" href="css/style.css"></head><body><nav id="navbar" class="navbar"></nav><main class="container"><header class="page-header"><div><p class="eyebrow">ARTICLE PICK</p><h1>기사 Pick 관리</h1><p>고객별 추천 기사 등록 및 Pick 결과를 확인합니다.</p></div></header><section class="grid dashboard-grid"><article class="panel"><div class="panel-header"><h2>추천 기사 등록</h2></div><form id="pickForm" class="panel-body form"><label class="field"><span>고객</span><select name="customer_no" id="customerSelect"></select></label><label class="field"><span>기사 제목</span><input class="input" name="title" required></label><label class="field"><span>기사 URL</span><input class="input" name="url" type="url" required></label><button class="primary-btn">등록 및 고객 알림</button></form></article><article class="panel"><div class="panel-header"><h2>추천 기사 현황</h2></div><div id="list" class="panel-body stack"></div></article></section></main><script src="js/common.js"></script><script>Page.initProtected('admin');let state=Store.load();state.customers.forEach(c=>customerSelect.innerHTML+=`<option value="${c.customer_no}">${c.customer_name}</option>`);function render(){list.innerHTML=state.article_recommendations.map(r=>{const c=state.customers.find(x=>x.customer_no===r.customer_no)||{};return `<div class="card-row"><h3>${UI.escape(r.title)} ${UI.statusBadge(r.status)}</h3><p>${c.customer_name||r.customer_no} · <a href="${r.url}" target="_blank">${r.url}</a></p></div>`}).join('')||'<div class="empty">등록된 추천 기사가 없습니다.</div>';}pickForm.onsubmit=e=>{e.preventDefault();const fd=new FormData(e.target);const r={id:'r'+Date.now(),customer_no:fd.get('customer_no'),title:fd.get('title'),url:fd.get('url'),status:'pending',created_at:Date.now()};state.article_recommendations.unshift(r);Store.save(state);const c=state.customers.find(x=>x.customer_no===r.customer_no);Webhook.send('pick_request',c.customer_no,c.customer_name,'추천 기사 Pick 요청이 등록되었습니다.');UI.toast('추천 기사를 등록했습니다.');e.target.reset();render();};render();</script></body></html>
+<!doctype html>
+<html lang="ko">
+  <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><title>Maestic - 기사 Pick 관리</title><link rel="stylesheet" href="css/style.css" /></head>
+  <body>
+    <nav id="navbar" class="navbar"></nav>
+    <main class="container">
+      <header class="page-header"><div><p class="eyebrow">ARTICLE PICK</p><h1>기사 Pick 관리</h1><p>주차별 추천 기사를 등록하고 고객의 최종 제출 결과를 확인합니다.</p></div></header>
+      <section class="grid dashboard-grid">
+        <article class="panel">
+          <div class="panel-header"><h2>추천 기사 등록</h2></div>
+          <form id="pickForm" class="panel-body form">
+            <label class="field"><span>고객</span><select name="customer_no" id="customerSelect"></select></label>
+            <label class="field"><span>주차</span><select name="week"><option value="1">1주차</option><option value="2">2주차</option><option value="3">3주차</option><option value="4">4주차</option><option value="5">5주차</option></select></label>
+            <label class="field"><span>기사 제목</span><input class="input" name="title" required /></label>
+            <label class="field"><span>기사 URL</span><input class="input" name="url" type="url" required /></label>
+            <button class="primary-btn">추천 기사 등록</button>
+          </form>
+        </article>
+        <article class="panel">
+          <div class="panel-header"><h2>고객 제출 결과</h2></div>
+          <div id="submissionList" class="panel-body stack"></div>
+        </article>
+        <article class="panel span-2">
+          <div class="panel-header"><h2>추천 기사 현황</h2></div>
+          <div id="recommendationList" class="panel-body stack"></div>
+        </article>
+      </section>
+    </main>
+    <script src="js/common.js"></script>
+    <script>
+      Page.initProtected('admin');
+      let state = Store.load();
+      state.customers.filter((c) => c.status !== 'deleted').forEach((c) => (customerSelect.innerHTML += `<option value="${c.customer_no}">${UI.escape(c.customer_name)}</option>`));
+      function renderRecommendations() {
+        recommendationList.innerHTML = state.article_recommendations.map((r) => {
+          const customer = state.customers.find((c) => c.customer_no === r.customer_no) || {};
+          return `<div class="card-row"><h3>${UI.escape(r.title)} ${UI.statusBadge(r.status)}</h3><p>${UI.escape(customer.customer_name || r.customer_no)} · ${r.week || 1}주차 · <a href="${r.url}" target="_blank">${UI.escape(r.url)}</a></p></div>`;
+        }).join('') || '<div class="empty">등록된 추천 기사가 없습니다.</div>';
+      }
+      function renderSubmissions() {
+        submissionList.innerHTML = state.pick_submissions.map((submission) => {
+          const picked = submission.picked_recommendations.map((id) => state.article_recommendations.find((r) => r.id === id)).filter(Boolean);
+          return `<div class="card-row"><h3>${UI.escape(submission.customer_name)} ${UI.statusBadge(submission.status)}</h3><p>${submission.week}주차 · ${new Date(submission.created_at).toLocaleString('ko-KR')}</p><p><strong>추천 기사 Pick</strong></p>${picked.map((r) => `<p>· ${UI.escape(r.title)} - <a href="${r.url}" target="_blank">${UI.escape(r.url)}</a></p>`).join('') || '<p>선택한 추천 기사가 없습니다.</p>'}<p><strong>직접 입력 기사</strong></p>${submission.direct_urls.map((url) => `<p>· <a href="${url}" target="_blank">${UI.escape(url)}</a></p>`).join('') || '<p>직접 입력 기사가 없습니다.</p>'}</div>`;
+        }).join('') || '<div class="empty">고객 제출 결과가 없습니다.</div>';
+      }
+      pickForm.onsubmit = (event) => {
+        event.preventDefault();
+        const fd = new FormData(event.target);
+        const customer = state.customers.find((c) => c.customer_no === fd.get('customer_no'));
+        const recommendation = { id: `r${Date.now()}`, customer_no: fd.get('customer_no'), week: Number(fd.get('week')), title: fd.get('title'), url: fd.get('url'), status: 'recommended', created_at: Date.now() };
+        state.article_recommendations.unshift(recommendation);
+        Store.save(state);
+        Notifier.send('pick_recommended', customer.customer_no, customer.customer_name, `${recommendation.week}주차 추천 기사가 등록되었습니다.`);
+        UI.toast('추천 기사를 등록했습니다.');
+        event.target.reset();
+        renderRecommendations();
+      };
+      renderRecommendations();
+      renderSubmissions();
+    </script>
+  </body>
+</html>
