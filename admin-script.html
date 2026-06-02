@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Maestic - 대본 관리 (관리자)</title>
+  <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <nav id="navbar"></nav>
+  <div class="main-wrap">
+    <div class="page-header">
+      <div>
+        <div class="page-title">📝 대본 관리</div>
+        <div class="page-subtitle">기사 Pick 기반 대본 제작 및 고객 검토를 관리합니다</div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <div id="month-select-area"></div>
+        <button class="btn btn-primary" onclick="openCreateScript()">+ 대본 추가</button>
+      </div>
+    </div>
+
+    <!-- 필터 -->
+    <div class="filter-bar">
+      <select class="form-control" id="customer-filter" onchange="filterScripts()" style="max-width:200px">
+        <option value="">전체 고객</option>
+      </select>
+      <select class="form-control" id="status-filter" onchange="filterScripts()" style="max-width:150px">
+        <option value="">전체 상태</option>
+        <option value="draft">초안</option>
+        <option value="reviewing">검토중</option>
+        <option value="revision_requested">수정요청</option>
+        <option value="approved">승인완료</option>
+        <option value="completed">완료</option>
+      </select>
+    </div>
+
+    <!-- 대본 목록 -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">📋 대본 목록</span>
+        <span class="text-muted small" id="script-count"></span>
+      </div>
+      <div id="script-table" class="loading"><div class="spinner"></div></div>
+    </div>
+  </div>
+
+  <!-- 대본 생성/편집 모달 -->
+  <div class="modal-overlay" id="script-modal" style="display:none">
+    <div class="modal-box" style="max-width:900px;max-height:95vh">
+      <div class="modal-header">
+        <span class="modal-title" id="s-modal-title">대본 작성</span>
+        <button class="modal-close" onclick="closeScriptModal()">✕</button>
+      </div>
+      <div class="modal-body" style="padding:0">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;height:calc(90vh - 130px)">
+          <!-- 왼쪽: 설정 패널 -->
+          <div style="padding:20px;border-right:1px solid var(--border);overflow-y:auto">
+            <input type="hidden" id="s-edit-id">
+            <div class="form-group">
+              <label>고객 선택 <span class="required">*</span></label>
+              <select id="s-customer" class="form-control" onchange="loadPicksForCustomer()">
+                <option value="">고객 선택...</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>기사 Pick 선택</label>
+              <select id="s-pick" class="form-control" onchange="onPickSelected()">
+                <option value="">기사 선택...</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>기사 제목</label>
+              <input type="text" id="s-article-title" class="form-control" placeholder="기사 제목">
+            </div>
+            <div class="form-group">
+              <label>대본 제목 <span class="required">*</span></label>
+              <input type="text" id="s-title" class="form-control" placeholder="대본 제목">
+            </div>
+            <div class="form-group">
+              <label>상태</label>
+              <select id="s-status" class="form-control">
+                <option value="draft">초안</option>
+                <option value="reviewing">검토중 (고객 확인 요청)</option>
+                <option value="approved">승인완료</option>
+                <option value="completed">완료</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>AI 모델</label>
+              <select id="s-ai-model" class="form-control">
+                <option value="gpt-4">GPT-4</option>
+                <option value="gpt-4o">GPT-4o</option>
+                <option value="claude-3-5-sonnet">Claude 3.5 Sonnet</option>
+                <option value="claude-3-opus">Claude 3 Opus</option>
+                <option value="manual">직접 작성</option>
+              </select>
+            </div>
+
+            <!-- AI 생성 설정 -->
+            <div id="ai-settings">
+              <hr style="margin:12px 0;border-color:var(--border)">
+              <div class="fw-600 small mb-16" style="margin-bottom:10px">🤖 AI 대본 생성</div>
+              <div class="form-group">
+                <label>OpenAI API Key</label>
+                <input type="password" id="openai-key" class="form-control" placeholder="sk-..." value="${getStoredKey('openai')}">
+              </div>
+              <div class="form-group">
+                <label>Anthropic API Key</label>
+                <input type="password" id="anthropic-key" class="form-control" placeholder="sk-ant-..." value="${getStoredKey('anthropic')}">
+              </div>
+              <div class="form-group">
+                <label>추가 지시사항</label>
+                <textarea id="s-extra-instruction" class="form-control" placeholder="이번 대본에만 적용할 특별 지시사항"></textarea>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn btn-primary" onclick="generateWithAI()" id="gen-btn">🤖 AI 초안 생성</button>
+                <button class="btn btn-outline" onclick="loadPromptFromCustomer()">📋 고객 프롬프트 불러오기</button>
+              </div>
+              <div id="ai-status" style="margin-top:8px;font-size:12px;color:var(--text-muted)"></div>
+            </div>
+
+            <!-- 고객 피드백 -->
+            <div id="feedback-section" style="display:none">
+              <hr style="margin:12px 0;border-color:var(--border)">
+              <div class="fw-600 small" style="margin-bottom:8px;color:var(--danger)">💬 고객 수정 의견</div>
+              <div id="feedback-content" style="background:var(--danger-light);border-radius:8px;padding:12px;font-size:13px;color:var(--text)"></div>
+            </div>
+          </div>
+
+          <!-- 오른쪽: 대본 에디터 -->
+          <div style="display:flex;flex-direction:column;height:100%">
+            <div style="padding:12px 20px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <span class="small fw-600">대본 내용</span>
+              <button class="btn btn-sm btn-outline" onclick="formatScript()">📐 자동 줄바꿈</button>
+              <button class="btn btn-sm btn-outline" onclick="clearScript()">🗑️ 초기화</button>
+              <span id="char-count" class="small text-muted" style="margin-left:auto">0자</span>
+            </div>
+            <textarea id="s-content" class="form-control" style="flex:1;border-radius:0;border:none;border-bottom:1px solid var(--border);resize:none;padding:16px;font-size:14px;line-height:1.8;font-family:inherit"
+              placeholder="여기에 대본을 작성하거나 AI로 생성해 주세요..." oninput="updateCharCount()"></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeScriptModal()">취소</button>
+        <button class="btn btn-outline" onclick="saveScript('draft')">초안 저장</button>
+        <button class="btn btn-primary" onclick="saveScript('reviewing')">💌 고객 검토 요청</button>
+        <button class="btn btn-success" onclick="saveScript('approved')">✅ 최종 승인</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/common.js"></script>
+  <script>
+    let session, allCustomers = [], allScripts = [], allPicks = [], allPrompts = [];
+    let curYear, curMonth;
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      session = Auth.requireAuth('admin');
+      if (!session) return;
+      UI.renderNavbar(session);
+      const { year: y, month: m } = MonthSelector.get();
+      curYear = y; curMonth = m;
+      MonthSelector.init('month-select-area', (y, m) => { curYear = y; curMonth = m; loadAll(); });
+      await loadAll();
+      const urlId = new URLSearchParams(window.location.search).get('id');
+      const urlNo = new URLSearchParams(window.location.search).get('no');
+      if (urlId) {
+        const s = allScripts.find(x => x.id === urlId);
+        if (s) openEditScript(s.id);
+      }
+      if (urlNo) document.getElementById('customer-filter').value = urlNo;
+    });
+
+    function getStoredKey(type) {
+      return localStorage.getItem(`maestic_${type}_key`) || '';
+    }
+
+    async function loadAll() {
+      [allCustomers, allScripts, allPicks, allPrompts] = await Promise.all([
+        API.getAll('customers'),
+        API.getAll('scripts'),
+        API.getAll('article_picks'),
+        API.getAll('ai_prompts')
+      ]);
+      const sel = document.getElementById('customer-filter');
+      sel.innerHTML = '<option value="">전체 고객</option>';
+      const sSel = document.getElementById('s-customer');
+      sSel.innerHTML = '<option value="">고객 선택...</option>';
+      allCustomers.forEach(c => {
+        sel.innerHTML += `<option value="${c.customer_no}">${c.customer_name} (${c.customer_no})</option>`;
+        sSel.innerHTML += `<option value="${c.customer_no}" data-id="${c.id}">${c.customer_name} (${c.customer_no})</option>`;
+      });
+      filterScripts();
+    }
+
+    function filterScripts() {
+      const cNo = document.getElementById('customer-filter').value;
+      const stat = document.getElementById('status-filter').value;
+      const filtered = allScripts.filter(s =>
+        (!cNo || s.customer_no === cNo) &&
+        (!stat || s.status === stat) &&
+        (s.year == curYear && s.month == curMonth)
+      );
+      document.getElementById('script-count').textContent = `${filtered.length}건`;
+      if (!filtered.length) {
+        document.getElementById('script-table').innerHTML = `<div class="empty-state"><div class="empty-icon">📝</div><div class="empty-title">대본 없음</div><div class="empty-sub">+ 대본 추가 버튼을 눌러 새 대본을 만드세요</div></div>`;
+        return;
+      }
+      document.getElementById('script-table').innerHTML = `
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>고객번호</th><th>고객명</th><th>기사 제목</th><th>대본 제목</th><th>버전</th><th>AI 모델</th><th>상태</th><th>피드백</th><th>관리</th></tr></thead>
+            <tbody>
+              ${filtered.map(s => {
+                const cust = allCustomers.find(c => c.customer_no === s.customer_no) || {};
+                return `<tr>
+                  <td>${s.customer_no}</td>
+                  <td class="fw-600">${cust.customer_name || s.customer_no}</td>
+                  <td class="small text-muted" style="max-width:150px">${(s.article_title||'').substring(0,30)}</td>
+                  <td class="fw-600">${s.script_title || '-'}</td>
+                  <td><span class="badge badge-secondary">v${s.current_version||1}</span></td>
+                  <td class="small">${s.ai_model || 'manual'}</td>
+                  <td>${UI.statusBadge(s.status)}</td>
+                  <td>${s.feedback_status === 'pending' && s.customer_feedback ? `<span class="badge badge-danger">💬 피드백</span>` : '-'}</td>
+                  <td>
+                    <div class="actions-cell">
+                      <button class="btn btn-sm btn-primary" onclick="openEditScript('${s.id}')">편집</button>
+                      <button class="btn btn-sm btn-danger" onclick="deleteScript('${s.id}')">삭제</button>
+                    </div>
+                  </td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    async function loadPicksForCustomer() {
+      const no = document.getElementById('s-customer').value;
+      const pickSel = document.getElementById('s-pick');
+      pickSel.innerHTML = '<option value="">기사 선택...</option>';
+      if (!no) return;
+      const myPicks = allPicks.filter(p => p.customer_no === no && p.year == curYear && p.month == curMonth && p.is_selected);
+      myPicks.forEach(p => {
+        pickSel.innerHTML += `<option value="${p.id}" data-url="${p.article_url}" data-title="${p.article_title}">${p.article_title || p.article_url}</option>`;
+      });
+    }
+
+    function onPickSelected() {
+      const sel = document.getElementById('s-pick');
+      const opt = sel.options[sel.selectedIndex];
+      if (!opt.value) return;
+      document.getElementById('s-article-title').value = opt.dataset.title || '';
+      document.getElementById('s-title').value = `${opt.dataset.title || '기사'} - 대본`;
+    }
+
+    async function loadPromptFromCustomer() {
+      const no = document.getElementById('s-customer').value;
+      if (!no) { UI.toast('고객을 먼저 선택해 주세요.', 'warning'); return; }
+      const prompt = allPrompts.find(p => p.customer_no === no);
+      if (!prompt) { UI.toast('저장된 프롬프트가 없습니다. AI 프롬프트 관리에서 먼저 등록해 주세요.', 'warning'); return; }
+      UI.toast('고객 프롬프트가 적용되었습니다.', 'success');
+      return prompt;
+    }
+
+    async function generateWithAI() {
+      const no = document.getElementById('s-customer').value;
+      const model = document.getElementById('s-ai-model').value;
+      const articleTitle = document.getElementById('s-article-title').value;
+      const pickSel = document.getElementById('s-pick');
+      const pickOpt = pickSel.options[pickSel.selectedIndex];
+      const articleUrl = pickOpt?.dataset?.url || '';
+      const extraInstruction = document.getElementById('s-extra-instruction').value;
+      const openaiKey = document.getElementById('openai-key').value.trim();
+      const anthropicKey = document.getElementById('anthropic-key').value.trim();
+
+      if (!articleTitle && !articleUrl) { UI.toast('기사 제목 또는 URL을 먼저 입력해 주세요.', 'warning'); return; }
+      if (!no) { UI.toast('고객을 먼저 선택해 주세요.', 'warning'); return; }
+
+      // API 키 저장
+      if (openaiKey) localStorage.setItem('maestic_openai_key', openaiKey);
+      if (anthropicKey) localStorage.setItem('maestic_anthropic_key', anthropicKey);
+
+      const prompt = allPrompts.find(p => p.customer_no === no);
+      const customer = allCustomers.find(c => c.customer_no === no);
+      
+      const { systemPrompt, userPrompt } = await AIHelper.generateScript(
+        prompt || { brand_tone: '전문적이고 신뢰감 있는', script_length: '2-3분 분량', target_audience: '일반 시청자' },
+        articleTitle, articleUrl, ''
+      );
+      const finalUserPrompt = userPrompt + (extraInstruction ? `\n\n추가 지시사항: ${extraInstruction}` : '');
+
+      const btn = document.getElementById('gen-btn');
+      btn.disabled = true; btn.textContent = '⏳ 생성 중...';
+      document.getElementById('ai-status').textContent = `${model} 모델로 생성 중...`;
+
+      try {
+        let content = '';
+        if (model.startsWith('gpt') && openaiKey) {
+          content = await callOpenAI(openaiKey, model, systemPrompt, finalUserPrompt);
+        } else if (model.startsWith('claude') && anthropicKey) {
+          content = await callClaude(anthropicKey, model, systemPrompt, finalUserPrompt);
+        } else {
+          // API 키 없을 때 샘플 생성
+          content = generateSampleScript(articleTitle, prompt, customer);
+        }
+        document.getElementById('s-content').value = content;
+        updateCharCount();
+        document.getElementById('ai-status').textContent = '✅ 생성 완료!';
+        UI.toast('대본이 생성되었습니다.', 'success');
+      } catch (e) {
+        document.getElementById('ai-status').textContent = '❌ 생성 실패: ' + e.message;
+        UI.toast('생성 중 오류가 발생했습니다: ' + e.message, 'danger');
+      }
+      btn.disabled = false; btn.textContent = '🤖 AI 초안 생성';
+    }
+
+    async function callOpenAI(apiKey, model, systemPrompt, userPrompt) {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: model,
+          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+          max_tokens: 2000, temperature: 0.7
+        })
+      });
+      if (!res.ok) throw new Error(`OpenAI API 오류: ${res.status}`);
+      const data = await res.json();
+      return data.choices[0].message.content;
+    }
+
+    async function callClaude(apiKey, model, systemPrompt, userPrompt) {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+          model: model,
+          max_tokens: 2000,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userPrompt }]
+        })
+      });
+      if (!res.ok) throw new Error(`Claude API 오류: ${res.status}`);
+      const data = await res.json();
+      return data.content[0].text;
+    }
+
+    function generateSampleScript(title, prompt, customer) {
+      const tone = prompt?.brand_tone || '전문적이고 신뢰감 있는';
+      const cta = prompt?.cta_text || '더 자세한 내용은 링크를 확인해 주세요.';
+      return `[인트로]
+안녕하세요, ${customer?.customer_name || ''}입니다.
+
+오늘은 "${title}"에 대해 이야기해 드리려고 합니다.
+
+[본문 1]
+최근 이 주제가 많은 분들의 관심을 받고 있는데요,
+오늘 제가 준비한 내용을 통해 핵심을 정리해 드리겠습니다.
+
+[본문 2]
+첫 번째로 중요한 점은...
+두 번째로 주목해야 할 사항은...
+세 번째로 실제 적용할 수 있는 방법은...
+
+[본문 3]
+이 내용이 여러분의 일상과 업무에 도움이 되길 바라며,
+${tone} 관점에서 바라본 핵심 포인트를 다시 한번 정리해 드리겠습니다.
+
+[아웃트로]
+오늘 영상이 도움이 되셨다면 좋아요와 구독 부탁드립니다.
+${cta}
+
+감사합니다!
+
+※ 이 대본은 샘플입니다. API Key를 입력하면 AI가 실제 기사 내용을 반영한 대본을 생성합니다.`;
+    }
+
+    function openCreateScript() {
+      document.getElementById('s-modal-title').textContent = '대본 작성';
+      document.getElementById('s-edit-id').value = '';
+      document.getElementById('s-customer').value = '';
+      document.getElementById('s-pick').innerHTML = '<option value="">기사 선택...</option>';
+      document.getElementById('s-title').value = '';
+      document.getElementById('s-article-title').value = '';
+      document.getElementById('s-content').value = '';
+      document.getElementById('s-status').value = 'draft';
+      document.getElementById('s-ai-model').value = 'gpt-4';
+      document.getElementById('s-extra-instruction').value = '';
+      document.getElementById('feedback-section').style.display = 'none';
+      updateCharCount();
+      document.getElementById('script-modal').style.display = 'flex';
+    }
+
+    async function openEditScript(id) {
+      const s = allScripts.find(x => x.id === id);
+      if (!s) return;
+      document.getElementById('s-modal-title').textContent = '대본 편집';
+      document.getElementById('s-edit-id').value = s.id;
+      document.getElementById('s-customer').value = s.customer_no || '';
+      await loadPicksForCustomer();
+      document.getElementById('s-title').value = s.script_title || '';
+      document.getElementById('s-article-title').value = s.article_title || '';
+      document.getElementById('s-content').value = s.content || '';
+      document.getElementById('s-status').value = s.status || 'draft';
+      document.getElementById('s-ai-model').value = s.ai_model || 'gpt-4';
+      if (s.customer_feedback) {
+        document.getElementById('feedback-section').style.display = '';
+        document.getElementById('feedback-content').innerHTML = `<strong>고객 의견:</strong><br>${s.customer_feedback}`;
+      } else {
+        document.getElementById('feedback-section').style.display = 'none';
+      }
+      updateCharCount();
+      document.getElementById('script-modal').style.display = 'flex';
+    }
+
+    async function saveScript(overrideStatus) {
+      const id = document.getElementById('s-edit-id').value;
+      const no = document.getElementById('s-customer').value;
+      const cust = allCustomers.find(c => c.customer_no === no);
+      const pickSel = document.getElementById('s-pick');
+      const pickOpt = pickSel.options[pickSel.selectedIndex];
+      if (!no) { alert('고객을 선택해 주세요.'); return; }
+      const title = document.getElementById('s-title').value.trim();
+      if (!title) { alert('대본 제목을 입력해 주세요.'); return; }
+      const status = overrideStatus || document.getElementById('s-status').value;
+      const content = document.getElementById('s-content').value;
+      const data = {
+        customer_id: cust?.id || '',
+        customer_no: no,
+        article_pick_id: pickOpt?.value || '',
+        article_title: document.getElementById('s-article-title').value.trim(),
+        script_title: title,
+        status,
+        current_version: id ? ((allScripts.find(s=>s.id===id)?.current_version||0)+1) : 1,
+        year: curYear, month: curMonth,
+        ai_model: document.getElementById('s-ai-model').value,
+        content,
+        feedback_status: 'reviewed'
+      };
+      try {
+        if (id) { await API.put('scripts', id, data); UI.toast('대본이 수정되었습니다.'); }
+        else { await API.post('scripts', data); UI.toast('대본이 추가되었습니다.', 'success'); }
+        if (status === 'reviewing') {
+          await Webhook.send('script_uploaded', no, cust?.customer_name || no, `${title} 대본 검토 요청이 왔습니다. 확인해 주세요!`);
+          UI.toast('고객에게 검토 요청 알림을 발송했습니다.', 'success');
+        }
+        closeScriptModal();
+        loadAll();
+      } catch (e) { UI.toast('저장 중 오류가 발생했습니다.', 'danger'); }
+    }
+
+    async function deleteScript(id) {
+      if (!UI.confirm('삭제하시겠습니까?')) return;
+      await API.delete('scripts', id);
+      UI.toast('삭제되었습니다.', 'danger');
+      loadAll();
+    }
+
+    function formatScript() {
+      const ta = document.getElementById('s-content');
+      ta.value = ta.value.replace(/\n{3,}/g, '\n\n');
+    }
+    function clearScript() {
+      if (confirm('대본 내용을 초기화하시겠습니까?')) {
+        document.getElementById('s-content').value = '';
+        updateCharCount();
+      }
+    }
+    function updateCharCount() {
+      document.getElementById('char-count').textContent = document.getElementById('s-content').value.length + '자';
+    }
+    function closeScriptModal() { document.getElementById('script-modal').style.display = 'none'; }
+    document.getElementById('script-modal')?.addEventListener('click', function(e) {
+      if (e.target === this) closeScriptModal();
+    });
+  </script>
+</body>
+</html>

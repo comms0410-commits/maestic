@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Maestic - 내 현황</title>
+  <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <nav id="navbar"></nav>
+  <div class="main-wrap">
+    <!-- 헤더 -->
+    <div id="customer-header" style="background:linear-gradient(135deg,#667eea,#764ba2);border-radius:16px;padding:24px 28px;margin-bottom:24px;color:#fff">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
+        <div>
+          <div style="font-size:12px;opacity:0.8;margin-bottom:4px">환영합니다</div>
+          <div style="font-size:24px;font-weight:800" id="h-name">-</div>
+          <div style="font-size:13px;opacity:0.8;margin-top:4px">
+            <span id="h-no">-</span> · <span id="h-product"></span> · <span id="h-status"></span>
+          </div>
+        </div>
+        <div id="month-select-area" style="filter:brightness(1.2)"></div>
+      </div>
+      <div style="display:flex;gap:20px;margin-top:20px;flex-wrap:wrap" id="h-kpi"></div>
+    </div>
+
+    <!-- 주차별 현황 -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">📅 주차별 업로드 현황</span>
+        <span class="text-muted small" id="month-label"></span>
+      </div>
+      <div id="weekly-area" class="loading"><div class="spinner"></div></div>
+    </div>
+
+    <!-- 공개 메모 -->
+    <div class="card" id="note-card" style="display:none">
+      <div class="card-header"><span class="card-title">📌 담당자 안내사항</span></div>
+      <div id="note-content" style="font-size:14px;line-height:1.8;color:var(--text)"></div>
+    </div>
+
+    <div class="grid-2">
+      <!-- 기사 Pick 현황 -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">📰 기사 Pick 현황</span>
+          <a href="customer-pick.html" class="btn btn-sm btn-primary">Pick 하러가기</a>
+        </div>
+        <div id="pick-status" class="loading"><div class="spinner"></div></div>
+      </div>
+
+      <!-- 대본 현황 -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">📝 대본 현황</span>
+          <a href="customer-script.html" class="btn btn-sm btn-outline">대본 보기</a>
+        </div>
+        <div id="script-status" class="loading"><div class="spinner"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/common.js"></script>
+  <script>
+    let session, customerInfo, monthlyData;
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      session = Auth.requireAuth('customer');
+      if (!session) return;
+      UI.renderNavbar(session);
+      MonthSelector.init('month-select-area', loadAll);
+    });
+
+    async function loadAll(y, m) {
+      await loadCustomerInfo();
+      await loadMonthly(y, m);
+      await loadPickStatus(y, m);
+      await loadScriptStatus(y, m);
+    }
+
+    async function loadCustomerInfo() {
+      const result = await API.getAll('customers', `search=${session.customerNo}`);
+      customerInfo = result.find(c => c.customer_no === session.customerNo);
+      if (!customerInfo) return;
+      document.getElementById('h-name').textContent = customerInfo.customer_name;
+      document.getElementById('h-no').textContent = `No. ${customerInfo.customer_no}`;
+      document.getElementById('h-product').innerHTML = `<span style="background:rgba(255,255,255,0.2);border-radius:20px;padding:2px 10px">${customerInfo.product_type}</span>`;
+      document.getElementById('h-status').innerHTML = customerInfo.status === 'active'
+        ? '<span style="background:rgba(16,185,129,0.3);border-radius:20px;padding:2px 10px;color:#d1fae5">●  활성</span>'
+        : `<span style="background:rgba(245,158,11,0.3);border-radius:20px;padding:2px 10px">${customerInfo.status}</span>`;
+    }
+
+    async function loadMonthly(y, m) {
+      const rows = await API.getAll('monthly_status');
+      monthlyData = rows.find(r => r.customer_no === session.customerNo && r.year == y && r.month == m);
+      document.getElementById('month-label').textContent = `${y}년 ${m}월`;
+
+      if (!monthlyData) {
+        document.getElementById('h-kpi').innerHTML = `<div style="opacity:0.8">아직 이번 달 데이터가 없습니다</div>`;
+        document.getElementById('weekly-area').innerHTML = `<div class="empty-state"><div class="empty-icon">📅</div><div class="empty-title">${y}년 ${m}월 현황 없음</div><div class="empty-sub">담당자가 곧 업데이트 예정입니다</div></div>`;
+        document.getElementById('note-card').style.display = 'none';
+        return;
+      }
+
+      const pct = Math.round((monthlyData.total_completed / monthlyData.total_target) * 100) || 0;
+      document.getElementById('h-kpi').innerHTML = `
+        <div style="background:rgba(255,255,255,0.15);border-radius:12px;padding:12px 20px;min-width:120px">
+          <div style="font-size:11px;opacity:0.8">월 목표</div>
+          <div style="font-size:26px;font-weight:800">${monthlyData.total_target}<span style="font-size:14px;opacity:0.7">개</span></div>
+        </div>
+        <div style="background:rgba(255,255,255,0.15);border-radius:12px;padding:12px 20px;min-width:120px">
+          <div style="font-size:11px;opacity:0.8">완료</div>
+          <div style="font-size:26px;font-weight:800">${monthlyData.total_completed}<span style="font-size:14px;opacity:0.7">개</span></div>
+        </div>
+        <div style="background:rgba(255,255,255,0.15);border-radius:12px;padding:12px 20px;min-width:140px">
+          <div style="font-size:11px;opacity:0.8">진행률</div>
+          <div style="font-size:26px;font-weight:800">${pct}<span style="font-size:14px;opacity:0.7">%</span></div>
+        </div>
+        <div style="background:rgba(255,255,255,0.15);border-radius:12px;padding:12px 20px">
+          <div style="font-size:11px;opacity:0.8">상태</div>
+          <div style="font-size:15px;font-weight:700;margin-top:4px">${monthlyData.status === 'in_progress' ? '⚡ 진행중' : monthlyData.status === 'completed' ? '✅ 완료' : monthlyData.status === 'paused' ? '⏸️ 일시정지' : '⏳ 대기중'}</div>
+        </div>
+      `;
+
+      const weeks = [1,2,3,4].map(w => {
+        const info = monthlyData[`week${w}_info`] || '-';
+        const done = monthlyData[`week${w}_done`] || 0;
+        return `<div class="week-card">
+          <div class="week-title">${w}주차</div>
+          <div class="week-count">${done}개</div>
+          <div class="week-info">${info}</div>
+        </div>`;
+      });
+      document.getElementById('weekly-area').innerHTML = `<div class="week-grid">${weeks.join('')}</div>`;
+
+      if (monthlyData.public_note) {
+        document.getElementById('note-card').style.display = '';
+        document.getElementById('note-content').textContent = monthlyData.public_note;
+      }
+    }
+
+    async function loadPickStatus(y, m) {
+      const picks = await API.getAll('article_picks');
+      const myPicks = picks.filter(p => p.customer_no === session.customerNo && p.year == y && p.month == m);
+      const selected = myPicks.filter(p => p.is_selected);
+      const submitted = myPicks.find(p => p.is_submitted);
+      
+      const recs = await API.getAll('article_recommendations');
+      const myRecs = recs.filter(r => r.customer_no === session.customerNo && r.year == y && r.month == m);
+
+      document.getElementById('pick-status').innerHTML = `
+        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px">
+          <div class="kpi-card ${myRecs.length ? 'primary' : ''}" style="flex:1;min-width:100px;padding:12px 16px">
+            <div class="kpi-label">추천 기사</div>
+            <div class="kpi-value">${myRecs.length}</div>
+            <div class="kpi-sub">등록됨</div>
+          </div>
+          <div class="kpi-card ${selected.length ? 'success' : ''}" style="flex:1;min-width:100px;padding:12px 16px">
+            <div class="kpi-label">선택 완료</div>
+            <div class="kpi-value">${selected.length}</div>
+            <div class="kpi-sub">/ 5개</div>
+          </div>
+        </div>
+        <div style="margin-bottom:12px">
+          ${submitted
+            ? `<div style="background:var(--success-light);color:var(--success);padding:10px 14px;border-radius:8px;font-size:13px;font-weight:600">✅ 기사 Pick 제출 완료</div>`
+            : myRecs.length
+              ? `<div style="background:var(--warning-light);color:#92400e;padding:10px 14px;border-radius:8px;font-size:13px;font-weight:600">⏳ 기사 Pick 대기중 - ${selected.length}/5개 선택됨</div>`
+              : `<div style="background:var(--secondary-light);color:var(--text-muted);padding:10px 14px;border-radius:8px;font-size:13px">담당자가 추천 기사를 등록 중입니다</div>`
+          }
+        </div>
+        ${!submitted && myRecs.length ? `<a href="customer-pick.html" class="btn btn-primary w-full">📰 기사 Pick 하러가기</a>` : ''}
+      `;
+    }
+
+    async function loadScriptStatus(y, m) {
+      const scripts = await API.getAll('scripts');
+      const myScripts = scripts.filter(s => s.customer_no === session.customerNo && s.year == y && s.month == m);
+      if (!myScripts.length) {
+        document.getElementById('script-status').innerHTML = `<div class="empty-state" style="padding:30px"><div class="empty-icon">📝</div><div class="empty-title">대본 없음</div><div class="empty-sub">기사 Pick 후 대본이 제작됩니다</div></div>`;
+        return;
+      }
+      const html = myScripts.map(s => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">
+          <div>
+            <div class="fw-600 small">${s.script_title || s.article_title}</div>
+            <div class="text-muted" style="font-size:11px">버전 ${s.current_version || 1} · ${UI.formatDate(s.updated_at)}</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            ${UI.statusBadge(s.status)}
+            <a href="customer-script.html?id=${s.id}" class="btn btn-sm btn-outline">보기</a>
+          </div>
+        </div>
+      `).join('');
+      document.getElementById('script-status').innerHTML = `<div>${html}</div>`;
+    }
+  </script>
+</body>
+</html>

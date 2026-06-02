@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Maestic - 기사 Pick 관리 (관리자)</title>
+  <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <nav id="navbar"></nav>
+  <div class="main-wrap">
+    <div class="page-header">
+      <div>
+        <div class="page-title">📰 기사 Pick 관리</div>
+        <div class="page-subtitle">고객별 추천 기사 등록 및 Pick 현황을 관리합니다</div>
+      </div>
+      <div id="month-select-area"></div>
+    </div>
+
+    <div class="grid-2" style="align-items:start">
+      <!-- 고객 목록 -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">👤 고객 선택</span>
+        </div>
+        <div id="customer-list" class="loading"><div class="spinner"></div></div>
+      </div>
+
+      <!-- 기사 관리 패널 -->
+      <div id="article-panel">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title" id="panel-title">고객을 선택하세요</span>
+            <button class="btn btn-sm btn-primary" id="save-recs-btn" onclick="saveRecommendations()" style="display:none">💾 저장</button>
+          </div>
+          <div id="rec-area">
+            <div class="empty-state"><div class="empty-icon">👈</div><div class="empty-title">왼쪽에서 고객을 선택해 주세요</div></div>
+          </div>
+        </div>
+
+        <!-- 고객 Pick 현황 -->
+        <div class="card" id="pick-result-card" style="display:none">
+          <div class="card-header">
+            <span class="card-title">✅ 고객 Pick 결과</span>
+            <button class="btn btn-sm btn-primary" id="to-script-btn" style="display:none" onclick="goToScript()">📝 대본 제작</button>
+          </div>
+          <div id="pick-result"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/common.js"></script>
+  <script>
+    let session, allCustomers = [], selectedCustomer = null, curYear, curMonth;
+    let recSlots = Array(10).fill(null).map((_,i) => ({ slot_no: i+1, article_url: '', article_title: '', article_summary: '', is_active: true, id: null }));
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      session = Auth.requireAuth('admin');
+      if (!session) return;
+      UI.renderNavbar(session);
+      const { year: y, month: m } = MonthSelector.get();
+      curYear = y; curMonth = m;
+      MonthSelector.init('month-select-area', (y, m) => {
+        curYear = y; curMonth = m;
+        if (selectedCustomer) loadArticles(selectedCustomer.customer_no);
+        loadCustomerList();
+      });
+      await loadCustomerList();
+      const urlNo = new URLSearchParams(window.location.search).get('no');
+      if (urlNo) {
+        await allCustomers;
+        const c = allCustomers.find(x => x.customer_no === urlNo);
+        if (c) selectCustomer(c);
+      }
+    });
+
+    async function loadCustomerList() {
+      allCustomers = await API.getAll('customers');
+      const picks = await API.getAll('article_picks');
+      const html = allCustomers.filter(c => c.status !== 'inactive').map(c => {
+        const submitted = picks.find(p => p.customer_no === c.customer_no && p.year == curYear && p.month == curMonth && p.is_submitted);
+        const selectedCount = picks.filter(p => p.customer_no === c.customer_no && p.year == curYear && p.month == curMonth && p.is_selected).length;
+        const isSelected = selectedCustomer?.customer_no === c.customer_no;
+        return `<div class="article-item ${isSelected ? 'selected' : ''}" onclick="selectCustomer(${JSON.stringify(c).replace(/"/g,'&quot;')})" style="cursor:pointer;margin-bottom:8px">
+          <div class="article-item-content">
+            <div class="article-item-title">${c.customer_name} <span class="text-muted small">(${c.customer_no})</span></div>
+            <div style="display:flex;gap:6px;margin-top:4px">
+              ${UI.productBadge(c.product_type)}
+              ${submitted
+                ? `<span class="badge badge-success">Pick 제출완료</span>`
+                : selectedCount > 0
+                  ? `<span class="badge badge-warning">Pick ${selectedCount}개 진행중</span>`
+                  : `<span class="badge badge-secondary">대기중</span>`
+              }
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+      document.getElementById('customer-list').innerHTML = html || `<div class="empty-state"><div class="empty-title">고객 없음</div></div>`;
+    }
+
+    async function selectCustomer(c) {
+      selectedCustomer = c;
+      document.getElementById('panel-title').textContent = `📰 ${c.customer_name} (${c.customer_no}) 추천 기사`;
+      document.getElementById('save-recs-btn').style.display = '';
+      document.getElementById('pick-result-card').style.display = '';
+      loadCustomerList();
+      await loadArticles(c.customer_no);
+      await loadPickResult(c.customer_no);
+    }
+
+    async function loadArticles(customerNo) {
+      const recs = await API.getAll('article_recommendations');
+      const myRecs = recs.filter(r => r.customer_no === customerNo && r.year == curYear && r.month == curMonth);
+      recSlots = Array.from({length:10}, (_,i) => {
+        const existing = myRecs.find(r => r.slot_no == i+1);
+        return existing ? {...existing} : { slot_no: i+1, article_url: '', article_title: '', article_summary: '', is_active: true, id: null };
+      });
+      renderRecSlots();
+    }
+
+    function renderRecSlots() {
+      document.getElementById('rec-area').innerHTML = `
+        <p class="text-muted small mb-16" style="margin-bottom:12px">추천 기사 링크를 입력하세요. URL 입력 후 제목/요약을 추가하면 됩니다.</p>
+        ${recSlots.map((s, i) => `
+          <div style="border:1.5px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px;background:${s.article_url ? 'var(--primary-light)' : 'var(--bg)'}">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+              <span class="badge badge-${s.article_url ? 'primary' : 'secondary'}">${i+1}</span>
+              <span class="small fw-600" style="flex:1">추천 기사 ${i+1}</span>
+              <input type="checkbox" id="slot-active-${i}" ${s.is_active ? 'checked' : ''} onchange="recSlots[${i}].is_active=this.checked" title="활성화">
+            </div>
+            <input type="url" class="form-control" style="margin-bottom:6px" placeholder="기사 URL" value="${s.article_url||''}"
+              oninput="recSlots[${i}].article_url=this.value" id="slot-url-${i}">
+            <input type="text" class="form-control" style="margin-bottom:6px" placeholder="기사 제목 (직접 입력)" value="${s.article_title||''}"
+              oninput="recSlots[${i}].article_title=this.value" id="slot-title-${i}">
+            <textarea class="form-control" style="min-height:50px" placeholder="기사 요약/설명 (선택)" oninput="recSlots[${i}].article_summary=this.value" id="slot-summary-${i}">${s.article_summary||''}</textarea>
+          </div>
+        `).join('')}
+      `;
+    }
+
+    async function saveRecommendations() {
+      if (!selectedCustomer) return;
+      let saved = 0;
+      for (const slot of recSlots) {
+        const data = {
+          customer_id: selectedCustomer.id,
+          customer_no: selectedCustomer.customer_no,
+          year: curYear, month: curMonth,
+          slot_no: slot.slot_no,
+          article_url: slot.article_url,
+          article_title: slot.article_title,
+          article_summary: slot.article_summary,
+          is_active: slot.is_active
+        };
+        if (slot.article_url) {
+          if (slot.id) { await API.put('article_recommendations', slot.id, data); }
+          else { const r = await API.post('article_recommendations', data); recSlots[slot.slot_no-1].id = r.id; }
+          saved++;
+        }
+      }
+      UI.toast(`${saved}개 기사가 저장되었습니다.`, 'success');
+      await Webhook.send('pick_request', selectedCustomer.customer_no, selectedCustomer.customer_name,
+        `${curYear}년 ${curMonth}월 추천 기사 ${saved}개가 등록되었습니다. 기사 Pick을 진행해 주세요!`);
+      loadCustomerList();
+    }
+
+    async function loadPickResult(customerNo) {
+      const picks = await API.getAll('article_picks');
+      const myPicks = picks.filter(p => p.customer_no === customerNo && p.year == curYear && p.month == curMonth);
+      const selected = myPicks.filter(p => p.is_selected);
+      const submitted = myPicks.find(p => p.is_submitted);
+      
+      if (!myPicks.length && !submitted) {
+        document.getElementById('pick-result').innerHTML = `<div class="empty-state" style="padding:30px"><div class="empty-icon">⏳</div><div class="empty-title">아직 Pick 없음</div><div class="empty-sub">고객이 기사를 선택하면 여기에 표시됩니다</div></div>`;
+        document.getElementById('to-script-btn').style.display = 'none';
+        return;
+      }
+      
+      document.getElementById('to-script-btn').style.display = submitted ? '' : 'none';
+      document.getElementById('pick-result').innerHTML = `
+        <div style="margin-bottom:12px">
+          ${submitted
+            ? `<div style="background:var(--success-light);color:var(--success);padding:10px;border-radius:8px;font-size:13px;font-weight:600">✅ 제출 완료 (${new Date(submitted.submitted_at || submitted.updated_at).toLocaleDateString('ko-KR')})</div>`
+            : `<div style="background:var(--warning-light);color:#92400e;padding:10px;border-radius:8px;font-size:13px">⏳ 선택 중... ${selected.length}/5개</div>`
+          }
+        </div>
+        ${selected.map(p => `
+          <div style="background:var(--bg);border-radius:8px;padding:10px 14px;margin-bottom:6px;border:1px solid var(--border)">
+            <div class="fw-600 small">${p.article_title || '제목 없음'}</div>
+            <div class="text-muted" style="font-size:11px;margin-top:2px">${p.article_url}</div>
+            <div class="text-muted small" style="margin-top:2px">${p.source_type === 'custom' ? '🔗 고객 직접 입력' : '⭐ 추천 기사 선택'}</div>
+          </div>
+        `).join('')}
+      `;
+    }
+
+    function goToScript() {
+      if (selectedCustomer) window.location.href = `admin-script.html?no=${selectedCustomer.customer_no}`;
+    }
+  </script>
+</body>
+</html>

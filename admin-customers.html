@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Maestic - 고객 월별 현황 관리</title>
+  <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <nav id="navbar"></nav>
+  <div class="main-wrap">
+    <div class="page-header">
+      <div>
+        <div class="page-title">📅 고객 월별 현황 관리</div>
+        <div class="page-subtitle">고객별 월간/주차별 업로드 현황을 관리합니다</div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <div id="month-select-area"></div>
+        <button class="btn btn-primary" onclick="openAddMonthly()">+ 월 데이터 추가</button>
+      </div>
+    </div>
+
+    <!-- 고객 선택 -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">👤 고객 선택</span>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <select class="form-control" id="customer-select" onchange="onCustomerChange()" style="max-width:250px">
+          <option value="">전체 고객 보기</option>
+        </select>
+        <input type="text" class="form-control" id="cust-search" placeholder="🔍 이름/번호 검색..." style="max-width:200px" oninput="filterCustomerSelect()">
+      </div>
+    </div>
+
+    <!-- 월별 현황 목록 -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title" id="table-title">전체 고객 월별 현황</span>
+        <span class="text-muted small" id="table-sub"></span>
+      </div>
+      <div id="monthly-table" class="loading"><div class="spinner"></div></div>
+    </div>
+  </div>
+
+  <!-- 월별 현황 추가/수정 모달 -->
+  <div class="modal-overlay" id="monthly-modal" style="display:none">
+    <div class="modal-box" style="max-width:700px">
+      <div class="modal-header">
+        <span class="modal-title" id="m-modal-title">월 데이터 추가</span>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="m-edit-id">
+        <div class="grid-2">
+          <div class="form-group">
+            <label>고객 선택 <span class="required">*</span></label>
+            <select id="m-customer" class="form-control">
+              <option value="">고객 선택...</option>
+            </select>
+          </div>
+          <div class="grid-2" style="gap:8px">
+            <div class="form-group">
+              <label>연도</label>
+              <input type="number" id="m-year" class="form-control" value="2026">
+            </div>
+            <div class="form-group">
+              <label>월</label>
+              <select id="m-month" class="form-control">
+                ${Array.from({length:12}, (_,i) => `<option value="${i+1}">${i+1}월</option>`).join('')}
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label>목표 수량</label>
+            <input type="number" id="m-target" class="form-control" placeholder="20">
+          </div>
+          <div class="form-group">
+            <label>완료 수량</label>
+            <input type="number" id="m-done" class="form-control" placeholder="0">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>상태</label>
+          <select id="m-status" class="form-control">
+            <option value="pending">대기중</option>
+            <option value="in_progress">진행중</option>
+            <option value="paused">일시정지</option>
+            <option value="completed">완료</option>
+          </select>
+        </div>
+        <hr style="margin:16px 0;border-color:var(--border)">
+        <div class="fw-600 mb-16" style="font-size:13px">📅 주차별 현황</div>
+        <div class="grid-2">
+          ${[1,2,3,4].map(w => `
+            <div style="background:var(--bg);border-radius:10px;padding:14px;">
+              <div class="fw-600 mb-16 small">${w}주차</div>
+              <div class="form-group mb-0">
+                <label class="small">업로드 일정</label>
+                <input type="text" id="m-week${w}-info" class="form-control" placeholder="예: 월~금5">
+              </div>
+              <div class="form-group" style="margin-top:8px;margin-bottom:0">
+                <label class="small">완료 수</label>
+                <input type="number" id="m-week${w}-done" class="form-control" placeholder="0">
+              </div>
+            </div>
+          `).join('')}
+        </div>
+        <hr style="margin:16px 0;border-color:var(--border)">
+        <div class="form-group">
+          <label>고객 공개 메모</label>
+          <textarea id="m-public-note" class="form-control" placeholder="고객에게 보이는 메모"></textarea>
+        </div>
+        <div class="form-group">
+          <label>내부 메모 <span class="badge badge-danger" style="font-size:10px">관리자 전용</span></label>
+          <textarea id="m-internal-note" class="form-control" placeholder="고객에게 보이지 않는 내부 메모"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal()">취소</button>
+        <button class="btn btn-primary" onclick="saveMonthly()">저장</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/common.js"></script>
+  <script>
+    let session, allCustomers = [], allMonthly = [], curYear, curMonth, selectedNo = '';
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      session = Auth.requireAuth('admin');
+      if (!session) return;
+      UI.renderNavbar(session);
+      const urlParams = new URLSearchParams(window.location.search);
+      selectedNo = urlParams.get('no') || '';
+      const { year: y, month: m } = MonthSelector.get();
+      curYear = y; curMonth = m;
+      MonthSelector.init('month-select-area', (y, m) => {
+        curYear = y; curMonth = m;
+        loadData();
+      });
+      await loadCustomers();
+      loadData();
+    });
+
+    async function loadCustomers() {
+      allCustomers = await API.getAll('customers');
+      const sel = document.getElementById('customer-select');
+      const mSel = document.getElementById('m-customer');
+      allCustomers.forEach(c => {
+        const opt = `<option value="${c.customer_no}" ${c.customer_no === selectedNo ? 'selected' : ''}>${c.customer_name} (${c.customer_no})</option>`;
+        sel.innerHTML += opt;
+        mSel.innerHTML += `<option value="${c.customer_no}">${c.customer_name} (${c.customer_no})</option>`;
+      });
+      if (selectedNo) {
+        const cust = allCustomers.find(c => c.customer_no === selectedNo);
+        if (cust) document.getElementById('table-title').textContent = `${cust.customer_name} 월별 현황`;
+      }
+    }
+
+    async function loadData() {
+      const rows = await API.getAll('monthly_status');
+      allMonthly = rows.filter(r => r.year == curYear && r.month == curMonth);
+      const filtered = selectedNo ? allMonthly.filter(r => r.customer_no === selectedNo) : allMonthly;
+      renderTable(filtered);
+    }
+
+    function renderTable(rows) {
+      document.getElementById('table-sub').textContent = `${curYear}년 ${curMonth}월 · ${rows.length}건`;
+      if (!rows.length) {
+        document.getElementById('monthly-table').innerHTML = `<div class="empty-state"><div class="empty-icon">📅</div><div class="empty-title">데이터 없음</div><div class="empty-sub">월 데이터를 추가해 주세요</div><button class="btn btn-primary mt-8" onclick="openAddMonthly()">+ 월 데이터 추가</button></div>`;
+        return;
+      }
+      document.getElementById('monthly-table').innerHTML = `
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>고객명</th><th>번호</th><th>목표</th><th>완료</th><th>진행률</th><th>1주</th><th>2주</th><th>3주</th><th>4주</th><th>상태</th><th>공개메모</th><th>관리</th></tr>
+            </thead>
+            <tbody>
+              ${rows.map(ms => {
+                const cust = allCustomers.find(c => c.customer_no === ms.customer_no) || {};
+                return `<tr>
+                  <td class="fw-600">${cust.customer_name || ms.customer_no}</td>
+                  <td>${ms.customer_no}</td>
+                  <td>${ms.total_target}</td>
+                  <td class="fw-bold text-success">${ms.total_completed}</td>
+                  <td>${UI.progress(ms.total_completed, ms.total_target)}</td>
+                  <td><div class="small">${ms.week1_info||'-'}</div><div class="fw-600">${ms.week1_done||0}개</div></td>
+                  <td><div class="small">${ms.week2_info||'-'}</div><div class="fw-600">${ms.week2_done||0}개</div></td>
+                  <td><div class="small">${ms.week3_info||'-'}</div><div class="fw-600">${ms.week3_done||0}개</div></td>
+                  <td><div class="small">${ms.week4_info||'-'}</div><div class="fw-600">${ms.week4_done||0}개</div></td>
+                  <td>${UI.statusBadge(ms.status)}</td>
+                  <td class="small text-muted" style="max-width:150px">${ms.public_note||'-'}</td>
+                  <td>
+                    <div class="actions-cell">
+                      <button class="btn btn-sm btn-outline" onclick="openEdit('${ms.id}')">수정</button>
+                      <button class="btn btn-sm btn-danger" onclick="deleteRow('${ms.id}')">삭제</button>
+                    </div>
+                  </td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function onCustomerChange() {
+      selectedNo = document.getElementById('customer-select').value;
+      const cust = allCustomers.find(c => c.customer_no === selectedNo);
+      document.getElementById('table-title').textContent = cust ? `${cust.customer_name} 월별 현황` : '전체 고객 월별 현황';
+      const filtered = selectedNo ? allMonthly.filter(r => r.customer_no === selectedNo) : allMonthly;
+      renderTable(filtered);
+    }
+
+    function filterCustomerSelect() {
+      const q = document.getElementById('cust-search').value.toLowerCase();
+      const sel = document.getElementById('customer-select');
+      Array.from(sel.options).forEach(opt => {
+        if (opt.value === '') return;
+        opt.style.display = opt.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+    }
+
+    function openAddMonthly() {
+      document.getElementById('m-modal-title').textContent = '월 데이터 추가';
+      document.getElementById('m-edit-id').value = '';
+      document.getElementById('m-year').value = curYear;
+      document.getElementById('m-month').value = curMonth;
+      document.getElementById('m-target').value = '';
+      document.getElementById('m-done').value = '0';
+      document.getElementById('m-status').value = 'in_progress';
+      document.getElementById('m-public-note').value = '';
+      document.getElementById('m-internal-note').value = '';
+      [1,2,3,4].forEach(w => {
+        document.getElementById(`m-week${w}-info`).value = '';
+        document.getElementById(`m-week${w}-done`).value = '0';
+      });
+      if (selectedNo) document.getElementById('m-customer').value = selectedNo;
+      document.getElementById('monthly-modal').style.display = 'flex';
+    }
+
+    function openEdit(id) {
+      const ms = allMonthly.find(x => x.id === id);
+      if (!ms) return;
+      document.getElementById('m-modal-title').textContent = '월 데이터 수정';
+      document.getElementById('m-edit-id').value = ms.id;
+      document.getElementById('m-customer').value = ms.customer_no;
+      document.getElementById('m-year').value = ms.year;
+      document.getElementById('m-month').value = ms.month;
+      document.getElementById('m-target').value = ms.total_target;
+      document.getElementById('m-done').value = ms.total_completed;
+      document.getElementById('m-status').value = ms.status;
+      document.getElementById('m-public-note').value = ms.public_note || '';
+      document.getElementById('m-internal-note').value = ms.internal_note || '';
+      [1,2,3,4].forEach(w => {
+        document.getElementById(`m-week${w}-info`).value = ms[`week${w}_info`] || '';
+        document.getElementById(`m-week${w}-done`).value = ms[`week${w}_done`] || 0;
+      });
+      document.getElementById('monthly-modal').style.display = 'flex';
+    }
+
+    async function saveMonthly() {
+      const id = document.getElementById('m-edit-id').value;
+      const custNo = document.getElementById('m-customer').value;
+      const cust = allCustomers.find(c => c.customer_no === custNo);
+      if (!custNo) { alert('고객을 선택해 주세요.'); return; }
+      const data = {
+        customer_id: cust?.id || '',
+        customer_no: custNo,
+        year: parseInt(document.getElementById('m-year').value),
+        month: parseInt(document.getElementById('m-month').value),
+        total_target: parseInt(document.getElementById('m-target').value) || 0,
+        total_completed: parseInt(document.getElementById('m-done').value) || 0,
+        status: document.getElementById('m-status').value,
+        public_note: document.getElementById('m-public-note').value.trim(),
+        internal_note: document.getElementById('m-internal-note').value.trim(),
+      };
+      [1,2,3,4].forEach(w => {
+        data[`week${w}_info`] = document.getElementById(`m-week${w}-info`).value.trim();
+        data[`week${w}_done`] = parseInt(document.getElementById(`m-week${w}-done`).value) || 0;
+      });
+      try {
+        if (id) { await API.put('monthly_status', id, data); UI.toast('수정되었습니다.'); }
+        else { await API.post('monthly_status', data); UI.toast('추가되었습니다.', 'success'); }
+        closeModal();
+        loadData();
+        // LINE/Claw 알림
+        await Webhook.send('status_update', custNo, cust?.customer_name || custNo, `${data.year}년 ${data.month}월 현황이 업데이트되었습니다. 완료: ${data.total_completed}/${data.total_target}`);
+      } catch (e) { UI.toast('저장 중 오류가 발생했습니다.', 'danger'); }
+    }
+
+    async function deleteRow(id) {
+      if (!UI.confirm('삭제하시겠습니까?')) return;
+      await API.delete('monthly_status', id);
+      UI.toast('삭제되었습니다.', 'danger');
+      loadData();
+    }
+
+    function closeModal() { document.getElementById('monthly-modal').style.display = 'none'; }
+    document.getElementById('monthly-modal')?.addEventListener('click', function(e) {
+      if (e.target === this) closeModal();
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Maestic - 기사 Pick (고객)</title>
+  <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <nav id="navbar"></nav>
+  <div class="main-wrap">
+    <div class="page-header">
+      <div>
+        <div class="page-title">📰 기사 Pick</div>
+        <div class="page-subtitle">이번 달 기사를 선택해 주세요. 최대 5개까지 선택 가능합니다.</div>
+      </div>
+      <div id="month-select-area"></div>
+    </div>
+
+    <!-- 선택 카운터 -->
+    <div id="pick-counter" style="background:var(--primary);color:#fff;border-radius:12px;padding:14px 20px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-size:12px;opacity:0.8">현재 선택</div>
+        <div style="font-size:22px;font-weight:800"><span id="pick-count">0</span> / 5개</div>
+      </div>
+      <div style="display:flex;gap:10px">
+        <button class="btn" style="background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.3)" onclick="saveDraft()">임시저장</button>
+        <button class="btn" style="background:#fff;color:var(--primary);font-weight:700" id="submit-btn" onclick="submitPick()">제출하기</button>
+      </div>
+    </div>
+
+    <!-- 제출 완료 배너 -->
+    <div id="submitted-banner" style="display:none;background:var(--success);color:#fff;border-radius:12px;padding:14px 20px;margin-bottom:20px">
+      <div style="font-size:15px;font-weight:700">✅ 기사 Pick이 제출되었습니다!</div>
+      <div style="font-size:12px;opacity:0.8;margin-top:4px">담당자가 확인 후 대본을 제작할 예정입니다.</div>
+    </div>
+
+    <div class="grid-2" style="align-items:start">
+      <!-- 관리자 추천 기사 -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">⭐ 추천 기사 (최대 10개)</span>
+          <span class="badge badge-primary" id="rec-count">0개</span>
+        </div>
+        <div id="rec-list">
+          <div class="loading"><div class="spinner"></div>불러오는 중...</div>
+        </div>
+      </div>
+
+      <!-- 직접 입력 -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">🔗 내가 원하는 기사 직접 입력 (최대 5개)</span>
+        </div>
+        <div id="custom-list"></div>
+        <button class="btn btn-outline w-full mt-8" id="add-custom-btn" onclick="addCustomSlot()" style="margin-top:12px">+ 기사 추가</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/common.js"></script>
+  <script>
+    let session, curYear, curMonth;
+    let recArticles = [];
+    let customSlots = [{ url: '', title: '' }];
+    let selectedIds = new Set(); // 추천 기사 ID Set
+    let isSubmitted = false;
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      session = Auth.requireAuth('customer');
+      if (!session) return;
+      UI.renderNavbar(session);
+      const { year: y, month: m } = MonthSelector.get();
+      curYear = y; curMonth = m;
+      MonthSelector.init('month-select-area', (y, m) => {
+        curYear = y; curMonth = m;
+        loadAll();
+      });
+      await loadAll();
+    });
+
+    async function loadAll() {
+      await loadRecommendations();
+      await loadExistingPicks();
+      renderCustomSlots();
+    }
+
+    async function loadRecommendations() {
+      const recs = await API.getAll('article_recommendations');
+      recArticles = recs.filter(r =>
+        r.customer_no === session.customerNo &&
+        r.year == curYear && r.month == curMonth && r.is_active && r.article_url
+      ).sort((a,b) => a.slot_no - b.slot_no);
+      document.getElementById('rec-count').textContent = `${recArticles.length}개`;
+      renderRecList();
+    }
+
+    async function loadExistingPicks() {
+      const picks = await API.getAll('article_picks');
+      const myPicks = picks.filter(p =>
+        p.customer_no === session.customerNo && p.year == curYear && p.month == curMonth
+      );
+      selectedIds = new Set(myPicks.filter(p => p.is_selected && p.source_type === 'recommendation').map(p => p.source_id));
+      isSubmitted = !!myPicks.find(p => p.is_submitted);
+
+      // 기존 커스텀 입력 복원
+      const customPicks = myPicks.filter(p => p.source_type === 'custom' && p.is_selected);
+      if (customPicks.length) {
+        customSlots = customPicks.map(p => ({ url: p.article_url, title: p.article_title, pickId: p.id }));
+      }
+
+      if (isSubmitted) {
+        document.getElementById('submitted-banner').style.display = '';
+        document.getElementById('pick-counter').style.display = 'none';
+        // 읽기 전용 모드
+        renderRecList(true);
+        renderCustomSlots(true);
+      }
+      updateCount();
+    }
+
+    function renderRecList(readOnly = false) {
+      if (!recArticles.length) {
+        document.getElementById('rec-list').innerHTML = `<div class="empty-state" style="padding:30px"><div class="empty-icon">⏳</div><div class="empty-title">추천 기사 준비 중</div><div class="empty-sub">담당자가 기사를 등록하면 표시됩니다</div></div>`;
+        return;
+      }
+      document.getElementById('rec-list').innerHTML = recArticles.map(r => {
+        const isSelected = selectedIds.has(r.id);
+        return `<div class="article-item ${isSelected ? 'selected' : ''}" id="rec-item-${r.id}"
+          onclick="${readOnly ? '' : `toggleRec('${r.id}')`}" style="${readOnly ? 'cursor:default' : ''}">
+          <input type="checkbox" ${isSelected ? 'checked' : ''} ${readOnly ? 'disabled' : ''}
+            onclick="event.stopPropagation();${readOnly ? '' : `toggleRec('${r.id}')`}" style="margin-top:2px">
+          <div class="article-item-content">
+            <div class="article-item-title">${r.article_title || '제목 없음'}</div>
+            <a href="${r.article_url}" target="_blank" class="article-item-url" onclick="event.stopPropagation()">${r.article_url}</a>
+            ${r.article_summary ? `<div class="article-item-summary">${r.article_summary}</div>` : ''}
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    function toggleRec(id) {
+      if (isSubmitted) return;
+      if (selectedIds.has(id)) {
+        selectedIds.delete(id);
+      } else {
+        if (getTotalSelected() >= 5) { UI.toast('최대 5개까지 선택 가능합니다.', 'warning'); return; }
+        selectedIds.add(id);
+      }
+      const item = document.getElementById(`rec-item-${id}`);
+      if (item) {
+        item.classList.toggle('selected', selectedIds.has(id));
+        item.querySelector('input').checked = selectedIds.has(id);
+      }
+      updateCount();
+    }
+
+    function getTotalSelected() {
+      const customFilled = customSlots.filter(s => s.url.trim()).length;
+      return selectedIds.size + customFilled;
+    }
+
+    function updateCount() {
+      const count = getTotalSelected();
+      document.getElementById('pick-count').textContent = count;
+      const btn = document.getElementById('submit-btn');
+      if (btn) {
+        btn.style.opacity = count > 0 ? '1' : '0.5';
+      }
+    }
+
+    function renderCustomSlots(readOnly = false) {
+      const html = customSlots.map((s, i) => `
+        <div style="border:1.5px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px;background:${s.url ? 'var(--primary-light)' : 'var(--bg)'}">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span class="badge badge-${s.url ? 'primary' : 'secondary'}">${i+1}</span>
+            ${!readOnly && customSlots.length > 1 ? `<button class="btn btn-sm btn-danger" style="margin-left:auto" onclick="removeCustomSlot(${i})">✕ 삭제</button>` : ''}
+          </div>
+          <input type="url" class="form-control" style="margin-bottom:6px" placeholder="기사 URL을 직접 입력해 주세요"
+            value="${s.url}" ${readOnly ? 'disabled' : ''} oninput="customSlots[${i}].url=this.value;updateCount()">
+          <input type="text" class="form-control" placeholder="기사 제목 (직접 입력)"
+            value="${s.title}" ${readOnly ? 'disabled' : ''} oninput="customSlots[${i}].title=this.value">
+        </div>
+      `).join('');
+      document.getElementById('custom-list').innerHTML = html;
+      const addBtn = document.getElementById('add-custom-btn');
+      if (addBtn) addBtn.style.display = readOnly || customSlots.length >= 5 ? 'none' : '';
+    }
+
+    function addCustomSlot() {
+      if (getTotalSelected() >= 5) { UI.toast('최대 5개까지 선택 가능합니다.', 'warning'); return; }
+      if (customSlots.length >= 5) { UI.toast('직접 입력은 최대 5개까지 가능합니다.', 'warning'); return; }
+      customSlots.push({ url: '', title: '' });
+      renderCustomSlots();
+      updateCount();
+    }
+
+    function removeCustomSlot(i) {
+      customSlots.splice(i, 1);
+      renderCustomSlots();
+      updateCount();
+    }
+
+    async function saveDraft() {
+      await savePicks(false);
+      UI.toast('임시저장 완료!', 'success');
+    }
+
+    async function submitPick() {
+      if (getTotalSelected() === 0) { UI.toast('최소 1개 이상 선택해 주세요.', 'warning'); return; }
+      if (!confirm('기사 Pick을 제출하시겠습니까? 제출 후에는 수정이 불가능합니다.')) return;
+      await savePicks(true);
+      isSubmitted = true;
+      document.getElementById('submitted-banner').style.display = '';
+      document.getElementById('pick-counter').style.display = 'none';
+      renderRecList(true);
+      renderCustomSlots(true);
+      UI.toast('기사 Pick이 제출되었습니다!', 'success');
+      await Webhook.send('pick_submitted', session.customerNo, session.name, `${session.name}(${session.customerNo})님이 ${curYear}년 ${curMonth}월 기사 Pick을 제출했습니다.`);
+    }
+
+    async function savePicks(isSubmit) {
+      // 기존 picks 삭제 후 재등록
+      const existing = await API.getAll('article_picks');
+      const myPicks = existing.filter(p => p.customer_no === session.customerNo && p.year == curYear && p.month == curMonth);
+      for (const p of myPicks) await API.delete('article_picks', p.id);
+
+      const now = new Date().toISOString();
+      for (const id of selectedIds) {
+        const rec = recArticles.find(r => r.id === id);
+        if (!rec) continue;
+        await API.post('article_picks', {
+          customer_id: session.customerId,
+          customer_no: session.customerNo,
+          year: curYear, month: curMonth,
+          source_type: 'recommendation',
+          source_id: id,
+          article_url: rec.article_url,
+          article_title: rec.article_title || '',
+          is_selected: true,
+          is_submitted: isSubmit,
+          submitted_at: isSubmit ? now : null
+        });
+      }
+      for (const slot of customSlots) {
+        if (!slot.url.trim()) continue;
+        await API.post('article_picks', {
+          customer_id: session.customerId,
+          customer_no: session.customerNo,
+          year: curYear, month: curMonth,
+          source_type: 'custom',
+          source_id: '',
+          article_url: slot.url,
+          article_title: slot.title,
+          is_selected: true,
+          is_submitted: isSubmit,
+          submitted_at: isSubmit ? now : null
+        });
+      }
+    }
+  </script>
+</body>
+</html>

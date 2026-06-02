@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Maestic 운영 포털 - 로그인</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    body { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+    .particles {
+      position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 0;
+    }
+    .particle {
+      position: absolute; border-radius: 50%;
+      background: rgba(255,255,255,0.1);
+      animation: float linear infinite;
+    }
+    @keyframes float {
+      from { transform: translateY(100vh) rotate(0deg); opacity: 0; }
+      10% { opacity: 1; }
+      90% { opacity: 1; }
+      to { transform: translateY(-100px) rotate(720deg); opacity: 0; }
+    }
+    .login-page { position: relative; z-index: 1; }
+  </style>
+</head>
+<body>
+  <div class="particles" id="particles"></div>
+  <div class="login-page">
+    <div class="login-box">
+      <div class="login-logo">
+        <div class="logo-icon">M</div>
+        <h1>Maestic 운영 포털</h1>
+        <p>고객 서비스 관리 시스템</p>
+      </div>
+
+      <div class="login-tabs">
+        <button class="login-tab active" id="tab-customer" onclick="switchTab('customer')">👤 고객 로그인</button>
+        <button class="login-tab" id="tab-admin" onclick="switchTab('admin')">👑 관리자 로그인</button>
+      </div>
+
+      <div id="error-msg" class="login-error"></div>
+
+      <!-- 고객 로그인 -->
+      <div id="form-customer">
+        <div class="form-group">
+          <label>고객번호 <span class="required">*</span></label>
+          <input type="text" id="customer-no" class="form-control" placeholder="고객번호를 입력하세요 (예: 011)"
+            maxlength="10" autocomplete="off" onkeydown="if(event.key==='Enter')loginCustomer()">
+        </div>
+        <div class="form-group">
+          <label>4자리 PIN <span class="required">*</span></label>
+          <div class="pin-input" id="pin-container">
+            <input type="password" class="pin-digit" maxlength="1" id="pin1" onkeyup="pinNext(this,'pin2')" onkeydown="pinPrev(event,this,'')">
+            <input type="password" class="pin-digit" maxlength="1" id="pin2" onkeyup="pinNext(this,'pin3')" onkeydown="pinPrev(event,this,'pin1')">
+            <input type="password" class="pin-digit" maxlength="1" id="pin3" onkeyup="pinNext(this,'pin4')" onkeydown="pinPrev(event,this,'pin2')">
+            <input type="password" class="pin-digit" maxlength="1" id="pin4" onkeyup="if(this.value)loginCustomer()" onkeydown="pinPrev(event,this,'pin3')">
+          </div>
+        </div>
+        <button class="btn btn-primary w-full btn-lg" onclick="loginCustomer()" id="btn-customer-login">
+          로그인
+        </button>
+        <div style="margin-top:16px;text-align:center;">
+          <p class="text-muted small">PIN을 모르시면 담당자에게 문의해 주세요.</p>
+        </div>
+      </div>
+
+      <!-- 관리자 로그인 -->
+      <div id="form-admin" style="display:none;">
+        <div class="form-group">
+          <label>관리자 아이디 <span class="required">*</span></label>
+          <input type="text" id="admin-id" class="form-control" placeholder="아이디" autocomplete="off"
+            onkeydown="if(event.key==='Enter')document.getElementById('admin-pw').focus()">
+        </div>
+        <div class="form-group">
+          <label>비밀번호 <span class="required">*</span></label>
+          <input type="password" id="admin-pw" class="form-control" placeholder="비밀번호"
+            onkeydown="if(event.key==='Enter')loginAdmin()">
+        </div>
+        <button class="btn btn-primary w-full btn-lg" onclick="loginAdmin()">
+          관리자 로그인
+        </button>
+        <div style="margin-top:16px;text-align:center;">
+          <p class="text-muted small">기본 계정: admin / maestic2026!</p>
+        </div>
+      </div>
+
+      <div style="margin-top:24px;padding-top:20px;border-top:1px solid var(--border);text-align:center;">
+        <p class="text-muted small">© 2026 Maestic · 고객 운영 관리 시스템</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/common.js"></script>
+  <script>
+    // 파티클 애니메이션
+    const container = document.getElementById('particles');
+    for (let i = 0; i < 15; i++) {
+      const p = document.createElement('div');
+      p.className = 'particle';
+      const size = Math.random() * 60 + 20;
+      p.style.cssText = `
+        width:${size}px; height:${size}px;
+        left:${Math.random()*100}%;
+        animation-duration:${Math.random()*10+8}s;
+        animation-delay:${Math.random()*8}s;
+      `;
+      container.appendChild(p);
+    }
+
+    // 이미 로그인된 경우 리다이렉트
+    const sess = Auth.getSession();
+    if (sess) {
+      if (sess.role === 'admin') window.location.href = 'admin.html';
+      else window.location.href = 'customer.html';
+    }
+
+    function switchTab(tab) {
+      document.getElementById('tab-customer').classList.toggle('active', tab === 'customer');
+      document.getElementById('tab-admin').classList.toggle('active', tab === 'admin');
+      document.getElementById('form-customer').style.display = tab === 'customer' ? 'block' : 'none';
+      document.getElementById('form-admin').style.display = tab === 'admin' ? 'block' : 'none';
+      hideError();
+    }
+
+    function showError(msg) {
+      const el = document.getElementById('error-msg');
+      el.textContent = msg; el.style.display = 'block';
+    }
+    function hideError() {
+      document.getElementById('error-msg').style.display = 'none';
+    }
+
+    function pinNext(current, nextId) {
+      if (current.value.length >= 1 && nextId) {
+        document.getElementById(nextId).focus();
+      }
+    }
+    function pinPrev(e, current, prevId) {
+      if (e.key === 'Backspace' && !current.value && prevId) {
+        document.getElementById(prevId).focus();
+      }
+    }
+
+    async function loginCustomer() {
+      const no = document.getElementById('customer-no').value.trim();
+      const pin = ['pin1','pin2','pin3','pin4'].map(id => document.getElementById(id).value).join('');
+      if (!no) { showError('고객번호를 입력해 주세요.'); return; }
+      if (pin.length < 4) { showError('4자리 PIN을 모두 입력해 주세요.'); return; }
+      hideError();
+      const btn = document.getElementById('btn-customer-login');
+      btn.disabled = true; btn.textContent = '로그인 중...';
+      const result = await Auth.loginCustomer(no, pin);
+      btn.disabled = false; btn.textContent = '로그인';
+      if (result.success) {
+        window.location.href = 'customer.html';
+      } else {
+        showError(result.message);
+        ['pin1','pin2','pin3','pin4'].forEach(id => document.getElementById(id).value = '');
+        document.getElementById('pin1').focus();
+      }
+    }
+
+    function loginAdmin() {
+      const id = document.getElementById('admin-id').value.trim();
+      const pw = document.getElementById('admin-pw').value;
+      if (!id || !pw) { showError('아이디와 비밀번호를 입력해 주세요.'); return; }
+      hideError();
+      const result = Auth.login('admin', id, pw);
+      if (result.success) {
+        window.location.href = 'admin.html';
+      } else {
+        showError(result.message);
+        document.getElementById('admin-pw').value = '';
+      }
+    }
+  </script>
+</body>
+</html>

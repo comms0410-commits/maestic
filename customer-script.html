@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Maestic - 내 대본 (고객)</title>
+  <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <nav id="navbar"></nav>
+  <div class="main-wrap">
+    <div class="page-header">
+      <div>
+        <div class="page-title">📝 내 대본</div>
+        <div class="page-subtitle">담당자가 제작한 대본을 확인하고 수정 의견을 남기세요</div>
+      </div>
+      <div id="month-select-area"></div>
+    </div>
+
+    <div id="script-list" class="loading"><div class="spinner"></div></div>
+  </div>
+
+  <!-- 대본 상세 모달 -->
+  <div class="modal-overlay" id="script-detail-modal" style="display:none">
+    <div class="modal-box" style="max-width:780px;max-height:95vh">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title" id="d-title">대본 제목</div>
+          <div class="text-muted small" id="d-meta"></div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span id="d-status-badge"></span>
+          <button class="modal-close" onclick="closeDetailModal()">✕</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <!-- 대본 내용 -->
+        <div style="background:var(--bg);border-radius:10px;padding:20px;margin-bottom:20px;min-height:200px;max-height:350px;overflow-y:auto">
+          <div id="d-content" style="font-size:14px;line-height:2;white-space:pre-wrap;color:var(--text)"></div>
+        </div>
+
+        <!-- 이전 피드백 -->
+        <div id="d-prev-feedback" style="display:none;margin-bottom:16px">
+          <div class="fw-600 small" style="margin-bottom:8px">이전 수정 의견</div>
+          <div id="d-prev-feedback-content" style="background:var(--danger-light);border-radius:8px;padding:12px;font-size:13px"></div>
+        </div>
+
+        <!-- 수정 의견 입력 -->
+        <div id="d-feedback-form" style="display:none">
+          <hr style="margin:16px 0;border-color:var(--border)">
+          <div class="fw-600" style="margin-bottom:12px;color:var(--danger)">💬 수정 의견 남기기</div>
+          <div class="form-group">
+            <label>수정이 필요한 내용을 상세히 작성해 주세요</label>
+            <textarea id="d-feedback-text" class="form-control" style="min-height:100px" placeholder="예: 2번째 문단에서 '전문성'을 강조해 주세요. 마지막 CTA 문구를 더 간결하게 변경해 주세요."></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" id="d-footer">
+        <button class="btn btn-outline" onclick="closeDetailModal()">닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/common.js"></script>
+  <script>
+    let session, curYear, curMonth, currentScript;
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      session = Auth.requireAuth('customer');
+      if (!session) return;
+      UI.renderNavbar(session);
+      const { year: y, month: m } = MonthSelector.get();
+      curYear = y; curMonth = m;
+      MonthSelector.init('month-select-area', (y, m) => { curYear = y; curMonth = m; loadScripts(); });
+      await loadScripts();
+      const urlId = new URLSearchParams(window.location.search).get('id');
+      if (urlId) {
+        const scripts = await API.getAll('scripts');
+        const s = scripts.find(x => x.id === urlId && x.customer_no === session.customerNo);
+        if (s) openScriptDetail(s);
+      }
+    });
+
+    async function loadScripts() {
+      const scripts = await API.getAll('scripts');
+      const myScripts = scripts.filter(s =>
+        s.customer_no === session.customerNo && s.year == curYear && s.month == curMonth
+      ).sort((a, b) => b.updated_at - a.updated_at);
+
+      if (!myScripts.length) {
+        document.getElementById('script-list').innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">📝</div>
+            <div class="empty-title">${curYear}년 ${curMonth}월 대본이 없습니다</div>
+            <div class="empty-sub">기사 Pick을 완료하면 담당자가 대본을 제작해 드립니다</div>
+            <a href="customer-pick.html" class="btn btn-primary mt-8" style="margin-top:12px">📰 기사 Pick 하러가기</a>
+          </div>
+        `;
+        return;
+      }
+
+      document.getElementById('script-list').innerHTML = myScripts.map(s => {
+        const statusMap = {
+          draft: { icon: '📋', text: '작성중', bg: 'var(--secondary-light)', color: 'var(--text-muted)' },
+          reviewing: { icon: '👀', text: '검토 요청', bg: 'var(--info-light)', color: 'var(--info)' },
+          revision_requested: { icon: '✏️', text: '수정 요청 완료', bg: 'var(--warning-light)', color: '#92400e' },
+          approved: { icon: '✅', text: '승인 완료', bg: 'var(--success-light)', color: 'var(--success)' },
+          completed: { icon: '🎉', text: '제작 완료', bg: 'var(--success-light)', color: 'var(--success)' }
+        };
+        const st = statusMap[s.status] || statusMap.draft;
+        return `
+          <div class="card" style="cursor:pointer;transition:transform 0.15s,box-shadow 0.15s" onmouseenter="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-md)'" onmouseleave="this.style.transform='';this.style.boxShadow=''" onclick="openScriptDetail(${JSON.stringify(s).replace(/"/g,'&quot;')})">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
+              <div style="flex:1">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                  <span style="font-size:20px">${st.icon}</span>
+                  <span class="fw-bold" style="font-size:16px">${s.script_title || '제목 없음'}</span>
+                  <span class="badge" style="background:${st.bg};color:${st.color}">${st.text}</span>
+                </div>
+                <div class="text-muted small">
+                  기사: ${s.article_title || '-'} · 버전 ${s.current_version || 1} · 
+                  ${s.ai_model && s.ai_model !== 'manual' ? `🤖 ${s.ai_model}` : '✍️ 직접 작성'} · 
+                  ${UI.formatDate(s.updated_at)}
+                </div>
+                ${s.customer_feedback && s.feedback_status === 'reviewed'
+                  ? `<div style="margin-top:8px;background:var(--success-light);color:var(--success);padding:6px 10px;border-radius:6px;font-size:12px">✅ 수정 의견이 반영되었습니다</div>`
+                  : s.customer_feedback
+                    ? `<div style="margin-top:8px;background:var(--warning-light);color:#92400e;padding:6px 10px;border-radius:6px;font-size:12px">💬 수정 의견 전달됨 - 반영 대기중</div>`
+                    : ''
+                }
+              </div>
+              <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+                ${s.status === 'reviewing'
+                  ? `<button class="btn btn-success" onclick="event.stopPropagation();quickApprove('${s.id}')">✅ 승인</button>
+                     <button class="btn btn-danger" onclick="event.stopPropagation();quickRevision('${s.id}')">✏️ 수정 요청</button>`
+                  : `<button class="btn btn-outline">상세 보기 →</button>`
+                }
+              </div>
+            </div>
+            <div style="margin-top:14px;background:var(--bg);border-radius:8px;padding:12px 14px;font-size:13px;line-height:1.7;color:var(--text);max-height:80px;overflow:hidden;position:relative">
+              <div style="white-space:pre-wrap">${(s.content || '').substring(0, 200)}${s.content?.length > 200 ? '...' : ''}</div>
+              ${s.content?.length > 200 ? `<div style="position:absolute;bottom:0;left:0;right:0;height:30px;background:linear-gradient(transparent,var(--bg))"></div>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function openScriptDetail(s) {
+      currentScript = s;
+      document.getElementById('d-title').textContent = s.script_title || '대본 제목';
+      document.getElementById('d-meta').textContent = `버전 ${s.current_version||1} · ${s.ai_model && s.ai_model !== 'manual' ? '🤖 ' + s.ai_model + ' 생성' : '✍️ 직접 작성'} · ${UI.formatDate(s.updated_at)}`;
+      document.getElementById('d-status-badge').innerHTML = UI.statusBadge(s.status);
+      document.getElementById('d-content').textContent = s.content || '(대본 내용 없음)';
+
+      // 이전 피드백
+      if (s.customer_feedback) {
+        document.getElementById('d-prev-feedback').style.display = '';
+        document.getElementById('d-prev-feedback-content').innerHTML = `<strong>내 의견:</strong> ${s.customer_feedback}<br><span class="small text-muted">${s.feedback_status === 'reviewed' ? '✅ 반영 완료' : '⏳ 검토 중'}</span>`;
+      } else {
+        document.getElementById('d-prev-feedback').style.display = 'none';
+      }
+
+      // 액션 버튼
+      const footer = document.getElementById('d-footer');
+      const feedbackForm = document.getElementById('d-feedback-form');
+      feedbackForm.style.display = 'none';
+
+      if (s.status === 'reviewing') {
+        footer.innerHTML = `
+          <button class="btn btn-outline" onclick="closeDetailModal()">닫기</button>
+          <button class="btn btn-outline btn-danger" onclick="showFeedbackForm()">✏️ 수정 요청</button>
+          <button class="btn btn-success" onclick="approveScript()">✅ 승인</button>
+        `;
+      } else if (s.status === 'revision_requested') {
+        footer.innerHTML = `<button class="btn btn-outline" onclick="closeDetailModal()">닫기</button><div class="text-muted small" style="margin-right:auto">수정 의견 반영 대기중</div>`;
+      } else {
+        footer.innerHTML = `<button class="btn btn-outline" onclick="closeDetailModal()">닫기</button>`;
+      }
+      document.getElementById('script-detail-modal').style.display = 'flex';
+    }
+
+    function showFeedbackForm() {
+      document.getElementById('d-feedback-form').style.display = '';
+      document.getElementById('d-feedback-text').value = '';
+      const footer = document.getElementById('d-footer');
+      footer.innerHTML = `
+        <button class="btn btn-outline" onclick="closeDetailModal()">취소</button>
+        <button class="btn btn-danger" onclick="submitFeedback()">💬 수정 의견 제출</button>
+      `;
+    }
+
+    async function submitFeedback() {
+      const feedback = document.getElementById('d-feedback-text').value.trim();
+      if (!feedback) { UI.toast('수정 의견을 입력해 주세요.', 'warning'); return; }
+      await API.patch('scripts', currentScript.id, {
+        customer_feedback: feedback,
+        feedback_status: 'pending',
+        status: 'revision_requested'
+      });
+      UI.toast('수정 의견이 전달되었습니다.', 'success');
+      await Webhook.send('feedback', session.customerNo, session.name,
+        `${session.name}님이 "${currentScript.script_title}" 대본에 수정 의견을 남겼습니다.`);
+      closeDetailModal();
+      loadScripts();
+    }
+
+    async function approveScript() {
+      await API.patch('scripts', currentScript.id, { status: 'approved' });
+      UI.toast('대본이 승인되었습니다!', 'success');
+      await Webhook.send('approval', session.customerNo, session.name,
+        `${session.name}님이 "${currentScript.script_title}" 대본을 최종 승인했습니다.`);
+      closeDetailModal();
+      loadScripts();
+    }
+
+    async function quickApprove(id) {
+      await API.patch('scripts', id, { status: 'approved' });
+      UI.toast('승인되었습니다!', 'success');
+      loadScripts();
+    }
+
+    async function quickRevision(id) {
+      const feedback = prompt('수정 의견을 간단히 입력해 주세요:');
+      if (!feedback) return;
+      await API.patch('scripts', id, { customer_feedback: feedback, feedback_status: 'pending', status: 'revision_requested' });
+      UI.toast('수정 요청이 전달되었습니다.', 'success');
+      loadScripts();
+    }
+
+    function closeDetailModal() { document.getElementById('script-detail-modal').style.display = 'none'; }
+    document.getElementById('script-detail-modal')?.addEventListener('click', function(e) {
+      if (e.target === this) closeDetailModal();
+    });
+  </script>
+</body>
+</html>

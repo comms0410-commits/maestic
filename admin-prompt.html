@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Maestic - AI 프롬프트 관리</title>
+  <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <nav id="navbar"></nav>
+  <div class="main-wrap">
+    <div class="page-header">
+      <div>
+        <div class="page-title">🤖 AI 프롬프트 관리</div>
+        <div class="page-subtitle">고객별 맞춤형 대본 생성 프롬프트를 설정합니다</div>
+      </div>
+    </div>
+
+    <div class="grid-2" style="align-items:start">
+      <!-- 고객 목록 -->
+      <div class="card">
+        <div class="card-header"><span class="card-title">👤 고객 선택</span></div>
+        <div id="customer-list" class="loading"><div class="spinner"></div></div>
+      </div>
+
+      <!-- 프롬프트 편집 -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title" id="prompt-title">프롬프트 설정</span>
+          <button class="btn btn-primary" id="save-prompt-btn" onclick="savePrompt()" style="display:none">💾 저장</button>
+        </div>
+        <div id="prompt-area">
+          <div class="empty-state"><div class="empty-icon">👈</div><div class="empty-title">고객을 선택하세요</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- API 키 설정 -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">🔑 AI API 키 설정</span>
+        <span class="badge badge-danger small">관리자 전용 · 브라우저에만 저장됨</span>
+      </div>
+      <p class="text-muted small" style="margin-bottom:16px">API 키는 브라우저 localStorage에만 저장되며, 서버로 전송되지 않습니다. 대본 생성 시 직접 사용됩니다.</p>
+      <div class="grid-2">
+        <div class="form-group">
+          <label>🟢 OpenAI API Key</label>
+          <input type="password" id="openai-key-setting" class="form-control" placeholder="sk-..." value="">
+          <div class="small text-muted mt-8">GPT-4, GPT-4o 모델 사용 시 필요</div>
+        </div>
+        <div class="form-group">
+          <label>🟠 Anthropic API Key</label>
+          <input type="password" id="anthropic-key-setting" class="form-control" placeholder="sk-ant-..." value="">
+          <div class="small text-muted mt-8">Claude 3.5 Sonnet, Claude 3 Opus 사용 시 필요</div>
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="saveApiKeys()">API 키 저장</button>
+      <button class="btn btn-outline" style="margin-left:8px" onclick="testApiKey()">연결 테스트</button>
+      <div id="api-test-result" style="margin-top:10px;font-size:13px"></div>
+    </div>
+
+    <!-- LINE/Claw Webhook 설정 -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">💬 LINE · Claw Webhook 설정</span>
+        <span class="badge badge-info">연동 설정</span>
+      </div>
+      <p class="text-muted small" style="margin-bottom:16px">Claw 에이전트 또는 LINE Messaging API webhook URL을 등록하면, 상태 변경 시 자동으로 알림이 발송됩니다.</p>
+      <div class="form-group">
+        <label>🐾 Claw Webhook URL</label>
+        <input type="url" id="claw-webhook" class="form-control" placeholder="https://your-claw-agent-webhook.url">
+        <div class="small text-muted mt-8">Claw 에이전트의 Incoming Webhook URL</div>
+      </div>
+      <div class="form-group">
+        <label>💚 LINE Messaging API - Channel Access Token</label>
+        <input type="password" id="line-token" class="form-control" placeholder="LINE Channel Access Token">
+      </div>
+      <div class="form-group">
+        <label>LINE Webhook URL (알림 수신용)</label>
+        <input type="url" id="line-webhook" class="form-control" placeholder="https://hooks.line.me/...">
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="webhook-enabled"> <span class="small fw-600">Webhook 알림 활성화</span>
+        </label>
+      </div>
+      <button class="btn btn-primary" style="margin-top:12px" onclick="saveWebhookConfig()">Webhook 설정 저장</button>
+      <button class="btn btn-outline" style="margin-left:8px" onclick="testWebhook()">테스트 발송</button>
+      <div id="webhook-test-result" style="margin-top:10px;font-size:13px"></div>
+
+      <div style="margin-top:20px;padding:16px;background:var(--bg);border-radius:10px;border:1px solid var(--border)">
+        <div class="fw-600 small" style="margin-bottom:8px">📖 Claw 연동 가이드</div>
+        <div class="text-muted small" style="line-height:1.8">
+          1. Claw 에이전트 → Webhook 설정 → Incoming URL 복사<br>
+          2. 위 "Claw Webhook URL" 칸에 붙여넣기<br>
+          3. "Webhook 알림 활성화" 체크<br>
+          4. 저장 후 테스트 발송으로 확인<br>
+          <br>
+          💡 발송되는 이벤트: 기사 Pick 제출, 대본 검토 요청, 수정 의견, 월별 현황 업데이트, 승인 완료
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/common.js"></script>
+  <script>
+    let session, allCustomers = [], allPrompts = [], selectedCustomer = null;
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      session = Auth.requireAuth('admin');
+      if (!session) return;
+      UI.renderNavbar(session);
+      await loadAll();
+      loadApiKeySettings();
+      loadWebhookSettings();
+    });
+
+    async function loadAll() {
+      [allCustomers, allPrompts] = await Promise.all([
+        API.getAll('customers'),
+        API.getAll('ai_prompts')
+      ]);
+      renderCustomerList();
+    }
+
+    function renderCustomerList() {
+      document.getElementById('customer-list').innerHTML = allCustomers.map(c => {
+        const hasPrompt = allPrompts.find(p => p.customer_no === c.customer_no);
+        const isSelected = selectedCustomer?.customer_no === c.customer_no;
+        return `<div class="article-item ${isSelected ? 'selected' : ''}" onclick="selectCustomer(${JSON.stringify(c).replace(/"/g,'&quot;')})" style="cursor:pointer;margin-bottom:8px">
+          <div class="article-item-content">
+            <div class="article-item-title">${c.customer_name} <span class="text-muted small">(${c.customer_no})</span></div>
+            <div style="margin-top:4px">
+              ${UI.productBadge(c.product_type)}
+              ${hasPrompt ? '<span class="badge badge-success">✅ 프롬프트 설정됨</span>' : '<span class="badge badge-secondary">미설정</span>'}
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    function selectCustomer(c) {
+      selectedCustomer = c;
+      const existing = allPrompts.find(p => p.customer_no === c.customer_no) || {};
+      document.getElementById('prompt-title').textContent = `${c.customer_name} 프롬프트 설정`;
+      document.getElementById('save-prompt-btn').style.display = '';
+      renderCustomerList();
+
+      document.getElementById('prompt-area').innerHTML = `
+        <input type="hidden" id="p-edit-id" value="${existing.id || ''}">
+        <div class="form-group">
+          <label>기본 AI 모델</label>
+          <select id="p-model" class="form-control">
+            <option value="gpt-4" ${existing.default_model==='gpt-4'?'selected':''}>GPT-4</option>
+            <option value="gpt-4o" ${existing.default_model==='gpt-4o'?'selected':''}>GPT-4o</option>
+            <option value="claude-3-5-sonnet" ${existing.default_model==='claude-3-5-sonnet'?'selected':''}>Claude 3.5 Sonnet</option>
+            <option value="claude-3-opus" ${existing.default_model==='claude-3-opus'?'selected':''}>Claude 3 Opus</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>브랜드 톤앤매너</label>
+          <input type="text" id="p-tone" class="form-control" value="${existing.brand_tone||''}" placeholder="예: 전문적이고 신뢰감 있는, 친근하고 대화체, 짧고 핵심적인">
+        </div>
+        <div class="form-group">
+          <label>타겟 독자/시청자</label>
+          <input type="text" id="p-target" class="form-control" value="${existing.target_audience||''}" placeholder="예: 30-50대 직장인, 소상공인, 법률 관심자">
+        </div>
+        <div class="form-group">
+          <label>강조 키워드</label>
+          <input type="text" id="p-keywords" class="form-control" value="${existing.keywords||''}" placeholder="예: 신뢰, 전문성, 무료상담">
+        </div>
+        <div class="form-group">
+          <label>대본 길이 기준</label>
+          <input type="text" id="p-length" class="form-control" value="${existing.script_length||''}" placeholder="예: 2-3분 분량 (300-450자)">
+        </div>
+        <div class="form-group">
+          <label>CTA 문구</label>
+          <input type="text" id="p-cta" class="form-control" value="${existing.cta_text||''}" placeholder="예: 무료 상담 신청은 프로필 링크에서!">
+        </div>
+        <div class="form-group">
+          <label>금지 표현 / 주의 사항</label>
+          <textarea id="p-restrictions" class="form-control" placeholder="예: 과장된 수익률 표현 금지, 경쟁사 직접 언급 금지">${existing.restrictions||''}</textarea>
+        </div>
+        <div class="form-group">
+          <label>업종 특화 지침</label>
+          <textarea id="p-industry" class="form-control" placeholder="예: 법률 관련 내용에서 반드시 '법적 자문이 필요합니다' 문구 포함">${existing.industry_guide||''}</textarea>
+        </div>
+        <div class="form-group">
+          <label>스타일 프롬프트 (상세)</label>
+          <textarea id="p-style" class="form-control" style="min-height:80px" placeholder="대본 구성 방식, 문체, 특이사항 등 자유롭게 작성">${existing.style_prompt||''}</textarea>
+        </div>
+        <div class="form-group">
+          <label>시스템 프롬프트 <span class="badge badge-danger" style="font-size:10px">고급</span></label>
+          <textarea id="p-system" class="form-control" style="min-height:100px" placeholder="AI 역할 정의. 비워두면 기본 프롬프트가 사용됩니다.">${existing.system_prompt||''}</textarea>
+        </div>
+        <div style="background:var(--bg);border-radius:8px;padding:14px;border:1px solid var(--border)">
+          <div class="fw-600 small" style="margin-bottom:8px">💡 기본 시스템 프롬프트 예시</div>
+          <div class="text-muted small" style="line-height:1.7">당신은 전문 SNS 콘텐츠 대본 작가입니다. 주어진 기사를 분석하여 유튜브 또는 SNS에 올릴 수 있는 자연스럽고 매력적인 대본을 작성해 주세요. 대본은 인트로, 본문, 아웃트로 구조를 따르고, 시청자가 끝까지 볼 수 있도록 흥미롭게 구성하세요.</div>
+        </div>
+      `;
+    }
+
+    async function savePrompt() {
+      if (!selectedCustomer) return;
+      const id = document.getElementById('p-edit-id').value;
+      const data = {
+        customer_id: selectedCustomer.id,
+        customer_no: selectedCustomer.customer_no,
+        default_model: document.getElementById('p-model').value,
+        brand_tone: document.getElementById('p-tone').value,
+        target_audience: document.getElementById('p-target').value,
+        keywords: document.getElementById('p-keywords').value,
+        script_length: document.getElementById('p-length').value,
+        cta_text: document.getElementById('p-cta').value,
+        restrictions: document.getElementById('p-restrictions').value,
+        industry_guide: document.getElementById('p-industry').value,
+        style_prompt: document.getElementById('p-style').value,
+        system_prompt: document.getElementById('p-system').value
+      };
+      try {
+        if (id) { await API.put('ai_prompts', id, data); UI.toast('프롬프트가 수정되었습니다.'); }
+        else { const r = await API.post('ai_prompts', data); document.getElementById('p-edit-id').value = r.id; UI.toast('프롬프트가 저장되었습니다.', 'success'); }
+        await loadAll();
+        renderCustomerList();
+      } catch (e) { UI.toast('저장 중 오류가 발생했습니다.', 'danger'); }
+    }
+
+    // API 키 설정
+    function loadApiKeySettings() {
+      document.getElementById('openai-key-setting').value = localStorage.getItem('maestic_openai_key') || '';
+      document.getElementById('anthropic-key-setting').value = localStorage.getItem('maestic_anthropic_key') || '';
+    }
+
+    function saveApiKeys() {
+      const ok = document.getElementById('openai-key-setting').value.trim();
+      const ak = document.getElementById('anthropic-key-setting').value.trim();
+      if (ok) localStorage.setItem('maestic_openai_key', ok);
+      if (ak) localStorage.setItem('maestic_anthropic_key', ak);
+      UI.toast('API 키가 저장되었습니다.', 'success');
+    }
+
+    async function testApiKey() {
+      const ok = document.getElementById('openai-key-setting').value.trim();
+      const resultEl = document.getElementById('api-test-result');
+      if (!ok) { resultEl.innerHTML = '<span style="color:var(--warning)">⚠️ OpenAI API Key를 입력해 주세요.</span>'; return; }
+      resultEl.innerHTML = '🔄 테스트 중...';
+      try {
+        const res = await fetch('https://api.openai.com/v1/models', { headers: { 'Authorization': `Bearer ${ok}` } });
+        if (res.ok) resultEl.innerHTML = '<span style="color:var(--success)">✅ OpenAI 연결 성공!</span>';
+        else resultEl.innerHTML = `<span style="color:var(--danger)">❌ OpenAI 연결 실패 (${res.status})</span>`;
+      } catch (e) {
+        resultEl.innerHTML = '<span style="color:var(--danger)">❌ 연결 실패: 네트워크 오류</span>';
+      }
+    }
+
+    // Webhook 설정
+    function loadWebhookSettings() {
+      const cfg = Webhook.getConfig();
+      document.getElementById('claw-webhook').value = cfg.clawWebhookUrl || '';
+      document.getElementById('line-token').value = cfg.lineAccessToken || '';
+      document.getElementById('line-webhook').value = cfg.lineWebhookUrl || '';
+      document.getElementById('webhook-enabled').checked = cfg.enabled || false;
+    }
+
+    function saveWebhookConfig() {
+      const cfg = {
+        clawWebhookUrl: document.getElementById('claw-webhook').value.trim(),
+        lineAccessToken: document.getElementById('line-token').value.trim(),
+        lineWebhookUrl: document.getElementById('line-webhook').value.trim(),
+        enabled: document.getElementById('webhook-enabled').checked
+      };
+      Webhook.saveConfig(cfg);
+      UI.toast('Webhook 설정이 저장되었습니다.', 'success');
+    }
+
+    async function testWebhook() {
+      const url = document.getElementById('claw-webhook').value.trim();
+      const resultEl = document.getElementById('webhook-test-result');
+      if (!url) { resultEl.innerHTML = '<span style="color:var(--warning)">⚠️ Webhook URL을 먼저 입력해 주세요.</span>'; return; }
+      resultEl.innerHTML = '🔄 테스트 발송 중...';
+      try {
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'test',
+            message: 'Maestic 운영 포털 - Webhook 연동 테스트 메시지입니다.',
+            timestamp: new Date().toISOString()
+          }),
+          mode: 'no-cors'
+        });
+        resultEl.innerHTML = '<span style="color:var(--success)">✅ 테스트 발송 완료 (no-cors 모드 - Claw에서 수신 확인 필요)</span>';
+      } catch (e) {
+        resultEl.innerHTML = `<span style="color:var(--danger)">❌ 발송 실패: ${e.message}</span>`;
+      }
+    }
+  </script>
+</body>
+</html>

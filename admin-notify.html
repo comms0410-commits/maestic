@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Maestic - 알림 이력</title>
+  <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <nav id="navbar"></nav>
+  <div class="main-wrap">
+    <div class="page-header">
+      <div>
+        <div class="page-title">🔔 알림 이력</div>
+        <div class="page-subtitle">LINE/Claw로 발송된 알림 이력을 확인합니다</div>
+      </div>
+      <button class="btn btn-primary" onclick="sendManualNotify()">+ 알림 발송</button>
+    </div>
+
+    <!-- 필터 -->
+    <div class="filter-bar">
+      <select class="form-control" id="customer-filter" onchange="loadNotifications()" style="max-width:200px">
+        <option value="">전체 고객</option>
+      </select>
+      <select class="form-control" id="type-filter" onchange="loadNotifications()" style="max-width:180px">
+        <option value="">전체 유형</option>
+        <option value="pick_request">기사 Pick 요청</option>
+        <option value="pick_submitted">기사 Pick 제출</option>
+        <option value="script_uploaded">대본 업로드</option>
+        <option value="status_update">현황 업데이트</option>
+        <option value="feedback">수정 의견</option>
+        <option value="approval">승인</option>
+        <option value="test">테스트</option>
+      </select>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">📋 발송 이력</span>
+        <span class="text-muted small" id="notify-count"></span>
+      </div>
+      <div id="notify-table" class="loading"><div class="spinner"></div></div>
+    </div>
+  </div>
+
+  <!-- 알림 발송 모달 -->
+  <div class="modal-overlay" id="notify-modal" style="display:none">
+    <div class="modal-box" style="max-width:500px">
+      <div class="modal-header">
+        <span class="modal-title">알림 발송</span>
+        <button class="modal-close" onclick="closeNotifyModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>대상 고객</label>
+          <select id="n-customer" class="form-control">
+            <option value="">전체 고객</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>알림 유형</label>
+          <select id="n-type" class="form-control">
+            <option value="status_update">현황 업데이트</option>
+            <option value="pick_request">기사 Pick 요청</option>
+            <option value="script_uploaded">대본 업로드</option>
+            <option value="custom">직접 입력</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>메시지 내용</label>
+          <textarea id="n-message" class="form-control" style="min-height:100px" placeholder="보낼 메시지를 입력하세요"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeNotifyModal()">취소</button>
+        <button class="btn btn-primary" onclick="sendNotification()">발송</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/common.js"></script>
+  <script>
+    let session, allCustomers = [];
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      session = Auth.requireAuth('admin');
+      if (!session) return;
+      UI.renderNavbar(session);
+      allCustomers = await API.getAll('customers');
+      const sel = document.getElementById('customer-filter');
+      const nSel = document.getElementById('n-customer');
+      allCustomers.forEach(c => {
+        sel.innerHTML += `<option value="${c.customer_no}">${c.customer_name} (${c.customer_no})</option>`;
+        nSel.innerHTML += `<option value="${c.customer_no}">${c.customer_name} (${c.customer_no})</option>`;
+      });
+      loadNotifications();
+    });
+
+    async function loadNotifications() {
+      const cNo = document.getElementById('customer-filter').value;
+      const type = document.getElementById('type-filter').value;
+      const all = await API.getAll('notifications');
+      const filtered = all.filter(n =>
+        (!cNo || n.customer_no === cNo) &&
+        (!type || n.type === type)
+      ).sort((a, b) => b.created_at - a.created_at);
+      document.getElementById('notify-count').textContent = `${filtered.length}건`;
+
+      if (!filtered.length) {
+        document.getElementById('notify-table').innerHTML = `<div class="empty-state"><div class="empty-icon">🔔</div><div class="empty-title">알림 이력 없음</div></div>`;
+        return;
+      }
+
+      const typeMap = {
+        pick_request: ['📰', '기사 Pick 요청', 'badge-primary'],
+        pick_submitted: ['✅', 'Pick 제출', 'badge-success'],
+        script_uploaded: ['📝', '대본 업로드', 'badge-info'],
+        status_update: ['📅', '현황 업데이트', 'badge-secondary'],
+        feedback: ['💬', '수정 의견', 'badge-warning'],
+        approval: ['🎉', '승인', 'badge-success'],
+        test: ['🔧', '테스트', 'badge-secondary']
+      };
+
+      document.getElementById('notify-table').innerHTML = `
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>발송 시각</th><th>고객</th><th>유형</th><th>채널</th><th>메시지</th><th>상태</th></tr></thead>
+            <tbody>
+              ${filtered.map(n => {
+                const cust = allCustomers.find(c => c.customer_no === n.customer_no) || {};
+                const [icon, label, cls] = typeMap[n.type] || ['🔔', n.type, 'badge-secondary'];
+                return `<tr>
+                  <td class="small text-muted">${UI.formatDate(n.created_at)}</td>
+                  <td class="fw-600">${cust.customer_name || n.customer_no || '전체'}</td>
+                  <td><span class="badge ${cls}">${icon} ${label}</span></td>
+                  <td class="small">${n.channel || 'web'}</td>
+                  <td class="small" style="max-width:300px">${n.message || '-'}</td>
+                  <td>${UI.statusBadge(n.send_status || 'sent')}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function sendManualNotify() {
+      document.getElementById('notify-modal').style.display = 'flex';
+    }
+
+    async function sendNotification() {
+      const no = document.getElementById('n-customer').value;
+      const type = document.getElementById('n-type').value;
+      const message = document.getElementById('n-message').value.trim();
+      if (!message) { UI.toast('메시지를 입력해 주세요.', 'warning'); return; }
+      const cust = allCustomers.find(c => c.customer_no === no);
+      await Webhook.send(type, no, cust?.customer_name || '전체', message);
+      UI.toast('알림이 발송되었습니다.', 'success');
+      closeNotifyModal();
+      loadNotifications();
+    }
+
+    function closeNotifyModal() { document.getElementById('notify-modal').style.display = 'none'; }
+    document.getElementById('notify-modal')?.addEventListener('click', function(e) {
+      if (e.target === this) closeNotifyModal();
+    });
+  </script>
+</body>
+</html>
