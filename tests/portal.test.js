@@ -20,5 +20,7 @@ assert.ok(common.includes('Auth'), 'auth helper should exist');
 const admin = fs.readFileSync('admin.html', 'utf8');
 assert.ok(admin.includes('관리 필요'), 'admin dashboard should show attention workflow');
 assert.ok(admin.includes('이번 주 업로드 운영 큐'), 'admin dashboard should show weekly upload queue');
+assert.ok(admin.includes('고객명 수정'), 'admin dashboard should allow editing customer names');
+assert.ok(admin.includes('saveCustomerName'), 'admin dashboard should persist customer name edits');
 
 console.log('portal static checks passed');
